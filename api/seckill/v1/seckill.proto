@@ -1,0 +1,271 @@
+syntax = "proto3";
+
+package api.seckill.v1;
+
+
+option go_package = "seckill-service/api/seckill/v1;v1";
+option java_multiple_files = true;
+option java_package = "api.seckill.v1";
+
+service Seckill{
+  // 查询秒杀商品列表
+  rpc SeckillProducts (SeckillProductsRequest) returns (SeckillProductsResponse) {
+    /*option (google.api.http) = {
+      get: "/seckill/products"
+    };*/
+  }
+
+  // 查询秒杀商品详情
+  rpc SeckillProductDetail (SeckillProductDetailRequest) returns (SeckillProductDetailResponse) {
+   /* option (google.api.http) = {
+      get: "/seckill/product/{product_id}"
+    };*/
+  }
+
+  // 秒杀活动信息
+  rpc GetCurrentActivity (GetCurrentActivityRequest) returns (GetCurrentActivityResponse) {
+   /* option (google.api.http) = {
+      get: "/api/v1/seckill/activity/current"
+    };*/
+  }
+
+  // 秒杀下单（核心高并发接口）
+  rpc CreateSeckillOrder (CreateSeckillOrderRequest) returns (CreateSeckillOrderResponse) {
+  }
+
+  // 查询秒杀订单
+  rpc GetSeckillOrder (GetSeckillOrderRequest) returns (GetSeckillOrderResponse) {
+  }
+
+  // 查询秒杀结果
+  rpc GetSeckillResult (GetSeckillResultRequest) returns (GetSeckillResultResponse) {
+  }
+
+  // 支付秒杀订单
+  rpc PaySeckillOrder (PaySeckillOrderRequest) returns (PaySeckillOrderResponse) {
+  }
+
+}
+
+//   ------------1.秒杀商品浏览------------
+// 查询秒杀商品列表
+message SeckillProductsRequest {
+  int64 user_id = 1;
+  int64 activity_id = 2; // 活动ID，不传则获取当前进行中的活动
+  int32 page = 3;
+  int32 page_size = 4;
+  int32 sort_type = 5;        // 排序：1-默认 2-价格升序 3-价格降序 4-库存升序 5-销量
+}
+
+message SeckillProductsResponse {
+  repeated ProductInfo products = 1;
+  int64 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+  ActivityInfo activity = 5;  //活动概要
+}
+
+message ProductInfo {
+  int64 sku_id = 1;      // seckill_sku.id
+  int64 product_id = 2;
+  string name = 3;
+  string main_image = 4;
+  int64 seckill_price = 5;
+  int64 market_price = 6;
+  int64 available_stock = 7;
+  int64 total_stock = 8;
+  int64 limit_num = 9;
+  int64 sale_rate = 10;   // 销售进度
+  bool user_has_bought = 11;  //是否已经购买
+}
+
+// 秒杀商品详情
+message SeckillProductDetailRequest {
+  int64 user_id = 1;
+  int64 product_id = 2;
+  int64 activity_id = 3;
+}
+
+message SeckillProductDetailResponse {
+  ProductDetail product = 1;
+  repeated CouponInfo available_coupons = 2;  // 可用优惠券
+  UserSeckillStatus user_status = 3;  // 用户秒杀状态
+}
+
+message ProductDetail {
+  // 商品基础信息（Product）
+  int64 product_id = 1;
+  string name = 2;
+  string subtitle = 3;
+  string main_image = 4;
+  string detail = 5;
+
+  // 秒杀信息（seckill_sku)
+  int64 sku_id = 6;
+  int64 seckill_price = 7;
+  int64 market_price = 8;
+  int64 total_stock = 9;
+  int64 available_stock = 10;
+  int64 limit_num = 11;  // 限买数量
+
+  // 活动信息(seckill_activity)
+  int64 activity_id = 12;
+  string activity_title = 13;
+  string activity_description = 14;
+  string start_time = 15;
+  string end_time = 16;
+  int64 activity_status = 17;  // 0-未开始 1-进行中 2-已结束
+  int64 remaining_seconds = 18; // 倒计时
+}
+
+
+// 用户秒杀状态
+message UserSeckillStatus {
+  bool has_bought = 1;
+  int64 bought_quantity = 2;
+  bool can_buy = 3;  // 是否可购买（未超限购、活动进行中、有库存）
+  int64 remaining_limit = 4;        // 剩余可购数量（limit_num - bought_quantity）
+  string message = 5;  //提示信息
+}
+
+
+// 活动概要
+message ActivityInfo {
+  int64 id = 1;
+  string title = 2;
+  string description = 3;
+  string start_time = 4;
+  string end_time = 5;
+  int32 status = 6;
+  int64 remaining_seconds = 7;
+}
+
+//-------------2.秒杀活动信息-------------
+message GetCurrentActivityRequest {
+  // 空请求，获取当前进行中的活动
+}
+
+
+message GetCurrentActivityResponse {
+  ActivityInfo activity = 1;
+  int64 product_count = 2;          // 活动商品数量
+}
+
+
+//------------3.秒杀下单-----------
+// 优惠券简略信息（从优惠券服务获取）
+message CouponInfo {
+  int64 id = 1;
+  string name = 2;
+  int32 type = 3;        // 1-满减 2-打折
+  int64 value = 4;       // 面额或折扣率
+  int64 min_amount = 5;  // 使用门槛
+  string end_time = 6;
+  bool is_usable = 7;    // 当前商品是否可用
+}
+
+// 创建秒杀订单（核心接口）
+message CreateSeckillOrderRequest {
+  int64 user_id = 1;
+  int64 sku_id = 2;      // seckill_sku.id
+  int64 activity_id = 3;
+  int64 product_id = 4;
+  int64 quantity = 5;    // 默认1
+  int64 coupon_id = 6;   // 使用的优惠券ID（可选）
+  int64 address_id = 7;
+  string client_ip = 8;  // 用于限流
+  string request_id = 9; // 幂等请求ID
+}
+
+message CreateSeckillOrderResponse {
+  string order_no = 1;
+  int64 order_amount = 2;    // 订单原总金额
+  int64 coupon_discount = 3; // 优惠券抵扣
+  int64 final_amount = 4;    // 实付金额
+  int32 status = 5;          // 0-待支付 1-已支付
+  int64 seckill_price = 6;              // 秒杀单价
+  int64 quantity = 7;                   // 购买数量
+  string message = 8;                   // 提示信息
+  int64 remaining_seconds = 9;        //  支付倒计时
+}
+
+
+
+//---------------4.秒杀订单查询---------------
+// 查询秒杀订单
+message GetSeckillOrderRequest {
+  string order_no = 1;
+  int64 user_id = 2;   // 用于鉴权
+}
+
+message GetSeckillOrderResponse {
+  SeckillOrderInfo order = 1;
+}
+
+// 秒杀订单信息
+message SeckillOrderInfo {
+  string order_no = 1;
+  int64 user_id = 2;
+  int64 activity_id = 3;
+  int64 product_id = 4;
+  int64 sku_id = 5;
+  string product_name = 6;
+  string product_image = 7;
+  int64 seckill_price = 8;
+  int64 quantity = 9;
+  int64 order_amount = 10;
+  int64 coupon_id = 11;
+  int64 coupon_discount = 12;
+  int64 final_amount = 13;
+  int32 status = 14;     // 0-待支付 1-已支付 2-已取消 3-已退款
+  string create_time = 15;
+  string pay_time = 16;
+  AddressSnapshot address = 17;
+  int64 Remaining_seconds = 18;
+}
+
+// 收货地址
+message AddressSnapshot {
+  int64 id = 1;
+  string receiver_name = 2;
+  string receiver_phone = 3;
+  string province = 4;
+  string city = 5;
+  string district = 6;
+  string detail_address = 7;
+}
+
+
+//  ------------------5.秒杀结果查询------------------
+message GetSeckillResultRequest {
+  int64 user_id = 1;
+  string request_id = 2;  // 创建订单时的请求ID
+  int64 activity_id = 3;
+  int64 product_id = 4;
+}
+
+message GetSeckillResultResponse {
+  int32 status = 1;       // 0-处理中 1-成功 2-失败
+  string order_no = 2;  // 返回的订单号
+  string message = 3;   // 失败原因
+  int64 order_amount = 4;  //成功是返回实付金额
+}
+
+
+// ----------------6.支付秒杀订单------------------
+
+// 支付订单
+message PaySeckillOrderRequest {
+  string order_no = 1;
+  int64 user_id = 2;
+  int32 pay_platform = 3; // 1-支付宝 2-微信
+}
+
+message PaySeckillOrderResponse {
+  bool success = 1;
+  string message = 2;
+  string pay_url = 3;  //支付链接
+  int64 pay_amount = 4;
+  string platform_number = 5;  //支付平台流水号
+}
+
