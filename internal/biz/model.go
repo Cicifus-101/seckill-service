@@ -37,6 +37,7 @@ type SeckillProductDetail struct {
 	EndTime          string
 	ActivityStatus   int64
 	RemainingSeconds int64
+	Version          uint32
 }
 
 // Activity 活动信息

@@ -175,7 +175,7 @@ func (s *SeckillService) CreateSeckillOrder(ctx context.Context, req *v1.CreateS
 			return nil, status.Errorf(codes.AlreadyExists, "订单已存在")
 		case errors.Is(err, biz.ErrExceedLimit):
 			return nil, status.Errorf(codes.FailedPrecondition, "超过限购数量")
-		case errors.Is(err, biz.ErrActivityNotStarted):
+		case errors.Is(err, biz.ErrActivityNotStart):
 			return nil, status.Errorf(codes.FailedPrecondition, "活动未开始")
 		case errors.Is(err, biz.ErrActivityEnded):
 			return nil, status.Errorf(codes.FailedPrecondition, "活动已结束")

@@ -7,34 +7,107 @@
 package main
 
 import (
+	"context"
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/log"
+	"github.com/go-kratos/kratos/v2/transport/grpc"
+	"github.com/go-kratos/kratos/v2/transport/http"
+	"github.com/go-redis/redis/v8"
 	"seckill-service/internal/biz"
+	"seckill-service/internal/cache"
 	"seckill-service/internal/conf"
 	"seckill-service/internal/data"
+	"seckill-service/internal/data/repo"
+	"seckill-service/internal/job"
+	"seckill-service/internal/kafka"
 	"seckill-service/internal/server"
 	"seckill-service/internal/service"
-)
-
-import (
-	_ "go.uber.org/automaxprocs"
 )
 
 // Injectors from wire.go:
 
 // wireApp init kratos application.
-func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*kratos.App, func(), error) {
-	dataData, err := data.NewData(confData, logger)
+func wireApp(s *conf.Server, d *conf.Data, logger log.Logger) (*kratos.App, func(), error) {
+	dataData, err := data.NewData(d, logger)
 	if err != nil {
 		return nil, nil, err
 	}
-	seckillRepo := data.NewSeckillRepo(dataData, logger)
+	seckillRepo := repo.NewMysqlRepo(dataData, logger)
+	client := provideRedis(d)
+	cacheRepo := repo.NewRedisRepo(client, logger)
+	producer := kafka.NewProducer(client, logger)
+	rateLimiter := cache.NewRateLimiter(client)
+	idempotentChecker := cache.NewIdempotentChecker(client)
+	delayQueue := job.NewDelayQueue(client, seckillRepo, cacheRepo, logger)
 	transaction := data.NewTransaction(dataData, logger)
-	seckillUsecase := biz.NewSeckillUsecase(seckillRepo, logger, transaction)
+	seckillUsecase := biz.NewSeckillUsecase(seckillRepo, cacheRepo, producer, rateLimiter, idempotentChecker, delayQueue, logger, transaction)
 	seckillService := service.NewSeckillService(seckillUsecase, logger)
-	grpcServer := server.NewGRPCServer(confServer, seckillService, logger)
-	httpServer := server.NewHTTPServer(confServer, seckillService, logger)
-	app := newApp(logger, grpcServer, httpServer)
+	grpcServer := server.NewGRPCServer(s, seckillService, logger)
+	httpServer := server.NewHTTPServer(s, seckillService, logger)
+	consumer := kafka.NewConsumer(client, seckillRepo, cacheRepo, idempotentChecker, logger)
+	compensateTask := job.NewCompensateTask(client, seckillRepo, cacheRepo, logger)
+	backgroundTasks := NewBackgroundTasks(consumer, delayQueue, compensateTask, seckillUsecase)
+	app := newApp(logger, grpcServer, httpServer, backgroundTasks)
 	return app, func() {
 	}, nil
+}
+
+// wire.go:
+
+// provideRedis 提供 Redis 客户端
+func provideRedis(c *conf.Data) *redis.Client {
+	return redis.NewClient(&redis.Options{
+		Addr:     c.Redis.Addr,
+		Password: c.Redis.Password,
+		DB:       int(c.Redis.Db),
+	})
+}
+
+// BackgroundTasks 后台任务启动器
+type BackgroundTasks struct {
+	Consumer       *kafka.Consumer
+	DelayQueue     *job.DelayQueue
+	CompensateTask *job.CompensateTask
+	SeckillUsecase *biz.SeckillUsecase
+}
+
+// NewBackgroundTasks 创建后台任务启动器
+func NewBackgroundTasks(
+	consumer *kafka.Consumer,
+	delayQueue *job.DelayQueue,
+	compensateTask *job.CompensateTask,
+	seckillUsecase *biz.SeckillUsecase,
+) *BackgroundTasks {
+	return &BackgroundTasks{
+		Consumer:       consumer,
+		DelayQueue:     delayQueue,
+		CompensateTask: compensateTask,
+		SeckillUsecase: seckillUsecase,
+	}
+}
+
+// Start 启动所有后台任务
+func (b *BackgroundTasks) Start(ctx context.Context, logger log.Logger) {
+	helper := log.NewHelper(logger)
+
+	if err := b.SeckillUsecase.WarmUpSeckillCache(ctx, 1); err != nil {
+		helper.Warnf("预热缓存失败: %v", err)
+	}
+
+	helper.Info("启动 MQ 消费者...")
+	go b.Consumer.Start(ctx)
+
+	helper.Info("启动延迟队列...")
+	go b.DelayQueue.Start(ctx)
+
+	helper.Info("启动补偿任务...")
+	go b.CompensateTask.Start(ctx)
+}
+
+func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, bg *BackgroundTasks) *kratos.App {
+	return kratos.New(kratos.ID(id), kratos.Name(Name), kratos.Version(Version), kratos.Metadata(map[string]string{}), kratos.Logger(logger), kratos.Server(gs, hs), kratos.AfterStart(func(ctx context.Context) error {
+		bg.Start(ctx, logger)
+		return nil
+	}),
+	)
 }

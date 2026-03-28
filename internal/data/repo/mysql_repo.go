@@ -1,37 +1,38 @@
-package data
+package repo
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/go-kratos/kratos/v2/log"
-	productModel "seckill-service/internal/data/product/model"
+	"seckill-service/internal/data"
 	"strings"
 	"time"
 
+	"github.com/go-kratos/kratos/v2/log"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
 	"seckill-service/internal/biz"
 	coreModel "seckill-service/internal/data/core/model"
 	payModel "seckill-service/internal/data/pay/model"
+	productModel "seckill-service/internal/data/product/model"
 )
 
-type seckillRepo struct {
-	data *Data
+type mysqlRepo struct {
+	data *data.Data
 	log  *log.Helper
 }
 
 // NewSeckillRepo 创建秒杀仓储
-func NewSeckillRepo(data *Data, logger log.Logger) biz.SeckillRepo {
-	return &seckillRepo{
-		data: data,
+func NewMysqlRepo(d *data.Data, logger log.Logger) biz.SeckillRepo {
+	return &mysqlRepo{
+		data: d,
 		log:  log.NewHelper(log.With(logger, "module", "repo/seckill")),
 	}
 }
 
 // ListSeckillProducts 获取秒杀商品列表
-func (r *seckillRepo) ListSeckillProducts(ctx context.Context, activityID uint64, page, pageSize int32, sortType int32) ([]*biz.SeckillProduct, int64, error) {
+func (r *mysqlRepo) ListSeckillProducts(ctx context.Context, activityID uint64, page, pageSize int32, sortType int32) ([]*biz.SeckillProduct, int64, error) {
 	q := r.data.GetCoreQuery(ctx)
 	productQ := r.data.GetProductQuery(ctx)
 
@@ -124,7 +125,7 @@ func (r *seckillRepo) ListSeckillProducts(ctx context.Context, activityID uint64
 }
 
 // GetSeckillProductDetail 获取秒杀商品详情
-func (r *seckillRepo) GetSeckillProductDetail(ctx context.Context, productID, activityID uint64) (*biz.SeckillProductDetail, error) {
+func (r *mysqlRepo) GetSeckillProductDetail(ctx context.Context, productID, activityID uint64) (*biz.SeckillProductDetail, error) {
 	q := r.data.GetCoreQuery(ctx)
 	productQ := r.data.GetProductQuery(ctx)
 
@@ -189,11 +190,12 @@ func (r *seckillRepo) GetSeckillProductDetail(ctx context.Context, productID, ac
 		EndTime:          activity.EndTime.Format("2006-01-02 15:04:05"),
 		ActivityStatus:   int64(activity.Status),
 		RemainingSeconds: remainingSeconds,
+		Version:          sku.Version,
 	}, nil
 }
 
 // GetCurrentActivity 获取当前活动
-func (r *seckillRepo) GetCurrentActivity(ctx context.Context) (*biz.Activity, int64, error) {
+func (r *mysqlRepo) GetCurrentActivity(ctx context.Context) (*biz.Activity, int64, error) {
 	q := r.data.GetCoreQuery(ctx)
 	now := time.Now()
 
@@ -236,7 +238,7 @@ func (r *seckillRepo) GetCurrentActivity(ctx context.Context) (*biz.Activity, in
 }
 
 // CreatePayInfo 创建支付记录
-func (r *seckillRepo) CreatePayInfo(ctx context.Context, payInfo *biz.PayInfo) error {
+func (r *mysqlRepo) CreatePayInfo(ctx context.Context, payInfo *biz.PayInfo) error {
 	q := r.data.GetPayQuery(ctx)
 
 	modelPayInfo := &payModel.PayInfo{
@@ -256,7 +258,7 @@ func (r *seckillRepo) CreatePayInfo(ctx context.Context, payInfo *biz.PayInfo) e
 }
 
 // LockStock 锁定库存（使用SELECT FOR UPDATE）
-func (r *seckillRepo) LockStock(ctx context.Context, skuID uint64, quantity uint32) (*biz.SkuStock, error) {
+func (r *mysqlRepo) LockStock(ctx context.Context, skuID uint64, quantity uint32) (*biz.SkuStock, error) {
 	q := r.data.GetCoreQuery(ctx)
 
 	// 使用 FOR UPDATE 悲观锁
@@ -273,7 +275,7 @@ func (r *seckillRepo) LockStock(ctx context.Context, skuID uint64, quantity uint
 		return nil, err
 	}
 
-	return &biz.SkuStock{
+	return &biz.SkuStock{ // 这里使用悲观锁的同时使用乐观锁（没必要）
 		ID:           sku.ID,
 		SeckillPrice: sku.SeckillPrice,
 		Version:      sku.Version,
@@ -281,7 +283,7 @@ func (r *seckillRepo) LockStock(ctx context.Context, skuID uint64, quantity uint
 }
 
 // DecreaseStock 扣减库存（乐观锁）
-func (r *seckillRepo) DecreaseStock(ctx context.Context, skuID uint64, quantity uint32, version uint32) error {
+func (r *mysqlRepo) DecreaseStock(ctx context.Context, skuID uint64, quantity uint32, version uint32) error {
 	q := r.data.GetCoreQuery(ctx)
 
 	info, err := q.SeckillSku.WithContext(ctx).
@@ -291,7 +293,7 @@ func (r *seckillRepo) DecreaseStock(ctx context.Context, skuID uint64, quantity 
 			q.SeckillSku.AvailableStock.Gte(quantity),
 		).
 		UpdateSimple(
-			q.SeckillSku.AvailableStock.Add(quantity),
+			q.SeckillSku.AvailableStock.Sub(quantity),
 			q.SeckillSku.Version.Add(1),
 		)
 
@@ -307,7 +309,7 @@ func (r *seckillRepo) DecreaseStock(ctx context.Context, skuID uint64, quantity 
 }
 
 // RestoreStock 恢复库存
-func (r *seckillRepo) RestoreStock(ctx context.Context, skuID uint64, quantity uint32) error {
+func (r *mysqlRepo) RestoreStock(ctx context.Context, skuID uint64, quantity uint32) error {
 	q := r.data.GetCoreQuery(ctx)
 
 	info, err := q.SeckillSku.WithContext(ctx).
@@ -327,7 +329,7 @@ func (r *seckillRepo) RestoreStock(ctx context.Context, skuID uint64, quantity u
 }
 
 // CheckUserBuyRecord 检查用户购买记录
-func (r *seckillRepo) CheckUserBuyRecord(ctx context.Context, userID, activityID, productID uint64) (*biz.UserBuyRecord, error) {
+func (r *mysqlRepo) CheckUserBuyRecord(ctx context.Context, userID, activityID, productID uint64) (*biz.UserBuyRecord, error) {
 	q := r.data.GetCoreQuery(ctx)
 
 	order, err := q.SeckillOrder.WithContext(ctx).
@@ -356,7 +358,7 @@ func (r *seckillRepo) CheckUserBuyRecord(ctx context.Context, userID, activityID
 }
 
 // GetUserAddress 获取用户地址
-func (r *seckillRepo) GetUserAddress(ctx context.Context, addressID uint64) (*biz.Address, error) {
+func (r *mysqlRepo) GetUserAddress(ctx context.Context, addressID uint64) (*biz.Address, error) {
 	q := r.data.GetUserQuery(ctx)
 
 	address, err := q.UserAddress.WithContext(ctx).
@@ -383,7 +385,7 @@ func (r *seckillRepo) GetUserAddress(ctx context.Context, addressID uint64) (*bi
 }
 
 // GetCoupon 获取优惠券（带行锁）
-func (r *seckillRepo) GetCoupon(ctx context.Context, couponID uint64) (*biz.Coupon, error) {
+func (r *mysqlRepo) GetCoupon(ctx context.Context, couponID uint64) (*biz.Coupon, error) {
 	q := r.data.GetCoreQuery(ctx)
 	now := time.Now()
 
@@ -415,7 +417,7 @@ func (r *seckillRepo) GetCoupon(ctx context.Context, couponID uint64) (*biz.Coup
 }
 
 // UseCoupon 使用优惠券
-func (r *seckillRepo) UseCoupon(ctx context.Context, couponID uint64, version uint32) error {
+func (r *mysqlRepo) UseCoupon(ctx context.Context, couponID uint64, version uint32) error {
 	q := r.data.GetCoreQuery(ctx)
 
 	info, err := q.Coupon.WithContext(ctx).
@@ -441,7 +443,7 @@ func (r *seckillRepo) UseCoupon(ctx context.Context, couponID uint64, version ui
 }
 
 // RestoreCoupon 恢复优惠券库存
-func (r *seckillRepo) RestoreCoupon(ctx context.Context, couponID uint64) error {
+func (r *mysqlRepo) RestoreCoupon(ctx context.Context, couponID uint64) error {
 	q := r.data.GetCoreQuery(ctx)
 
 	info, err := q.Coupon.WithContext(ctx).
@@ -461,7 +463,7 @@ func (r *seckillRepo) RestoreCoupon(ctx context.Context, couponID uint64) error 
 }
 
 // CreateOrder 创建订单
-func (r *seckillRepo) CreateOrder(ctx context.Context, order *biz.Order) (string, error) {
+func (r *mysqlRepo) CreateOrder(ctx context.Context, order *biz.Order) (string, error) {
 	q := r.data.GetCoreQuery(ctx)
 
 	// 生成订单号
@@ -505,7 +507,7 @@ func (r *seckillRepo) CreateOrder(ctx context.Context, order *biz.Order) (string
 }
 
 // CreateOrderShipping 创建收货信息快照
-func (r *seckillRepo) CreateOrderShipping(ctx context.Context, orderNo string, address *biz.Address) error {
+func (r *mysqlRepo) CreateOrderShipping(ctx context.Context, orderNo string, address *biz.Address) error {
 	q := r.data.GetCoreQuery(ctx)
 
 	shipping := &coreModel.OrderShipping{
@@ -522,7 +524,7 @@ func (r *seckillRepo) CreateOrderShipping(ctx context.Context, orderNo string, a
 }
 
 // GetOrder 获取订单信息
-func (r *seckillRepo) GetOrder(ctx context.Context, orderNo string) (*biz.OrderInfo, error) {
+func (r *mysqlRepo) GetOrder(ctx context.Context, orderNo string) (*biz.OrderInfo, error) {
 	q := r.data.GetCoreQuery(ctx)
 
 	order, err := q.SeckillOrder.WithContext(ctx).
@@ -581,7 +583,7 @@ func (r *seckillRepo) GetOrder(ctx context.Context, orderNo string) (*biz.OrderI
 }
 
 // GetOrderForUpdate 获取订单信息（带行锁）
-func (r *seckillRepo) GetOrderForUpdate(ctx context.Context, orderNo string) (*biz.OrderInfo, error) {
+func (r *mysqlRepo) GetOrderForUpdate(ctx context.Context, orderNo string) (*biz.OrderInfo, error) {
 	q := r.data.GetCoreQuery(ctx)
 
 	order, err := q.SeckillOrder.WithContext(ctx).
@@ -620,7 +622,7 @@ func (r *seckillRepo) GetOrderForUpdate(ctx context.Context, orderNo string) (*b
 }
 
 // UpdateOrderStatus 更新订单状态
-func (r *seckillRepo) UpdateOrderStatus(ctx context.Context, orderNo string, status int32) error {
+func (r *mysqlRepo) UpdateOrderStatus(ctx context.Context, orderNo string, status int32) error {
 	q := r.data.GetCoreQuery(ctx)
 
 	updates := map[string]interface{}{
@@ -639,7 +641,7 @@ func (r *seckillRepo) UpdateOrderStatus(ctx context.Context, orderNo string, sta
 }
 
 // GetPendingOrders 获取超时待支付订单
-func (r *seckillRepo) GetPendingOrders(ctx context.Context, timeoutMinutes int) ([]*biz.OrderInfo, error) {
+func (r *mysqlRepo) GetPendingOrders(ctx context.Context, timeoutMinutes int) ([]*biz.OrderInfo, error) {
 	q := r.data.GetCoreQuery(ctx)
 	timeoutTime := time.Now().Add(-time.Duration(timeoutMinutes) * time.Minute)
 

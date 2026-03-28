@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/go-kratos/kratos/v2/log"
+
+	"seckill-service/internal/mq"
 	"time"
 )
 
@@ -20,41 +22,6 @@ const (
 	OrderTimeoutSeconds = OrderTimeoutMinutes * 60 // 订单超时秒数
 )
 
-// 秒杀存储接口
-type SeckillRepo interface {
-	// 商品
-	ListSeckillProducts(ctx context.Context, activityID uint64, page, pageSize int32, sortType int32) ([]*SeckillProduct, int64, error)
-	GetSeckillProductDetail(ctx context.Context, productID, activityID uint64) (*SeckillProductDetail, error)
-
-	// 活动
-	GetCurrentActivity(ctx context.Context) (*Activity, int64, error)
-
-	// 用户
-	CheckUserBuyRecord(ctx context.Context, userID, activityID, productID uint64) (*UserBuyRecord, error)
-	GetUserAddress(ctx context.Context, addressID uint64) (*Address, error)
-
-	// 库存相关
-	LockStock(ctx context.Context, skuID uint64, quantity uint32) (*SkuStock, error)        // 行锁
-	DecreaseStock(ctx context.Context, skuID uint64, quantity uint32, version uint32) error // 乐观锁
-	RestoreStock(ctx context.Context, skuID uint64, quantity uint32) error                  // 恢复库存
-
-	// 订单相关
-	CreateOrder(ctx context.Context, order *Order) (string, error)
-	CreateOrderShipping(ctx context.Context, orderNo string, address *Address) error
-	GetOrder(ctx context.Context, orderNo string) (*OrderInfo, error)
-	GetOrderForUpdate(ctx context.Context, orderNo string) (*OrderInfo, error) // 带行锁
-	UpdateOrderStatus(ctx context.Context, orderNo string, status int32) error
-	GetPendingOrders(ctx context.Context, timeoutMinutes int) ([]*OrderInfo, error)
-
-	// 支付相关
-	CreatePayInfo(ctx context.Context, payInfo *PayInfo) error
-
-	// 优惠券相关
-	GetCoupon(ctx context.Context, couponID uint64) (*Coupon, error)
-	UseCoupon(ctx context.Context, couponID uint64, version uint32) error
-	RestoreCoupon(ctx context.Context, couponID uint64) error // 恢复优惠券库存
-}
-
 // Transaction 事务接口
 type Transaction interface {
 	ExecTx(ctx context.Context, fn func(ctx context.Context) error) error
@@ -67,17 +34,34 @@ type SkuStock struct {
 	Version      uint32
 }
 
-type SeckillUsecase struct {
-	Repo SeckillRepo
-	log  *log.Helper
-	tx   Transaction
+// 防止循环导入，实现解耦
+type MQProducer interface {
+	Send(ctx context.Context, msg *mq.SeckillOrderMessage) error
 }
 
-func NewSeckillUsecase(repo SeckillRepo, logger log.Logger, tx Transaction) *SeckillUsecase {
+type SeckillUsecase struct {
+	Repo       SeckillRepo
+	Cache      CacheRepo
+	MQ         MQProducer
+	Limiter    RateLimiter
+	Idempotent IdempotentChecker
+	DelayQueue DelayQueue
+	log        *log.Helper
+	tx         Transaction
+}
+
+func NewSeckillUsecase(repo SeckillRepo, cache CacheRepo, mq MQProducer,
+	limiter RateLimiter, idempotent IdempotentChecker, delayQueue DelayQueue,
+	logger log.Logger, tx Transaction) *SeckillUsecase {
 	return &SeckillUsecase{
-		Repo: repo,
-		log:  log.NewHelper(log.With(logger, "module", "usecase/seckill")),
-		tx:   tx,
+		Repo:       repo,
+		Cache:      cache,
+		MQ:         mq,
+		Limiter:    limiter,
+		Idempotent: idempotent,
+		DelayQueue: delayQueue,
+		log:        log.NewHelper(log.With(logger, "module", "usecase/seckill")),
+		tx:         tx,
 	}
 }
 
@@ -177,101 +161,126 @@ func (uc *SeckillUsecase) GetSeckillProductDetail(ctx context.Context, userID, p
 
 // CreateSeckillOrder 创建秒杀订单
 func (uc *SeckillUsecase) CreateSeckillOrder(ctx context.Context, req *CreateOrderRequest) (*CreateOrderResult, error) {
-	var res *CreateOrderResult
-
-	// 使用事务保持数据的一致性
-	err := uc.tx.ExecTx(ctx, func(txCtx context.Context) error {
-		// 1.检查活动状态
-		activity, _, err := uc.Repo.GetCurrentActivity(ctx)
-		if err != nil {
-			return err
-		}
-		if activity.ID != req.ActivityID {
-			return ErrNoActiveActivity
-		}
-
-		// 2.检查用户的购买记录（实现一人一单）
-		record, err := uc.Repo.CheckUserBuyRecord(txCtx, req.UserID, req.ActivityID, req.ProductID)
-		if err != nil {
-			return err
-		}
-
-		productInfo, err := uc.Repo.GetSeckillProductDetail(txCtx, req.ProductID, req.ActivityID)
-		if err != nil {
-			return err
-		}
-
-		if record.Quantity+req.Quantity > productInfo.LimitNum {
-			return ErrExceedLimit
-		}
-
-		// 3.锁定库存 （使用SELECT FOR UPDATE）
-		skuStock, err := uc.Repo.LockStock(txCtx, req.SkuID, uint32(req.Quantity))
-		if err != nil {
-			return err
-		}
-
-		// 4.计算订单金额
-		orderAmount := skuStock.SeckillPrice * uint64(req.Quantity)
-		finalAmount, couponDiscount, err := uc.applyCoupon(txCtx, req.CouponID, orderAmount)
-		if err != nil {
-			return err
-		}
-
-		// 5.获取收货地址
-		address, err := uc.Repo.GetUserAddress(txCtx, req.AddressID)
-		if err != nil {
-			return err
-		}
-		// 6.创建订单
-		order := &Order{
-			UserID:       req.UserID,
-			ActivityID:   req.ActivityID,
-			ProductID:    req.ProductID,
-			SkuID:        skuStock.ID,
-			ProductName:  productInfo.Name,
-			ProductImage: productInfo.MainImage,
-			SeckillPrice: skuStock.SeckillPrice,
-			Quantity:     req.Quantity,
-			OrderAmount:  orderAmount,
-			CouponID:     req.CouponID,
-			AddressID:    req.AddressID,
-		}
-
-		orderNo, err := uc.Repo.CreateOrder(txCtx, order)
-		if err != nil {
-			return err
-		}
-
-		// 7.创建收货信息快照
-		if err := uc.Repo.CreateOrderShipping(txCtx, orderNo, address); err != nil {
-			return err
-		}
-
-		// 8.扣减库存（使用乐观锁版本）
-		if err := uc.Repo.DecreaseStock(txCtx, skuStock.ID, uint32(req.Quantity), skuStock.Version); err != nil {
-			return err
-		}
-
-		res = &CreateOrderResult{
-			OrderNo:          orderNo,
-			OrderAmount:      orderAmount,
-			CouponDiscount:   couponDiscount,
-			FinalAmount:      finalAmount,
-			Status:           OrderStatusPending, // 待支付
-			SeckillPrice:     skuStock.SeckillPrice,
-			Quantity:         req.Quantity,
-			RemainingSeconds: OrderTimeoutSeconds, // 15分钟支付倒计时
-		}
-		return nil
-	})
-
+	// 全局限流
+	allowed, err := uc.Limiter.GlobalRateLimit(ctx, 10000, time.Second)
 	if err != nil {
-		uc.log.WithContext(ctx).Errorf("创建订单失败: %v", err)
+		uc.log.WithContext(ctx).Errorf("全局限流检查失败: %v", err)
+		return nil, ErrSystemBusy
+	}
+
+	if !allowed {
+		uc.log.WithContext(ctx).Warnf("全局限流触发, user=%d", req.UserID)
+		return nil, ErrSystemBusy
+	}
+
+	// 用户限流（防止单个用户刷单）
+	allowed, err = uc.Limiter.UserRateLimit(ctx, req.UserID, 3, time.Second)
+	if err != nil {
+		uc.log.WithContext(ctx).Errorf("用户限流检查失败: %v", err)
+		return nil, ErrTooManyRequests
+	}
+	if !allowed {
+		uc.log.WithContext(ctx).Warnf("用户限流触发, user=%d", req.UserID)
+		return nil, ErrTooManyRequests
+	}
+
+	// 2.1 请求幂等检查（防止重复提交）
+	isFirst, err := uc.Idempotent.CheckAndMark(ctx, req.RequestID, 5*time.Minute)
+	if err != nil {
+		uc.log.WithContext(ctx).Errorf("幂等检查失败: %v", err)
+		return nil, err
+	}
+	if !isFirst {
+		uc.log.WithContext(ctx).Warnf("重复请求, requestId=%s", req.RequestID)
+		return nil, ErrDuplicateRequest
+	}
+
+	// 3.1 获取当前活动
+	activity, _, err := uc.Repo.GetCurrentActivity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if activity.ID != req.ActivityID {
+		return nil, ErrNoActiveActivity
+	}
+
+	// 4.1 检查用户是否已购买（一人一单）
+	record, err := uc.Repo.CheckUserBuyRecord(ctx, req.UserID, req.ActivityID, req.ProductID)
+	if err != nil {
+		return nil, err
+	}
+	if record.HasBought {
+		uc.log.WithContext(ctx).Warnf("用户已购买, user=%d, product=%d", req.UserID, req.ProductID)
+		return nil, ErrAlreadyBought
+	}
+	// 4.2 获取商品详情，检查限购
+	productInfo, err := uc.Repo.GetSeckillProductDetail(ctx, req.ProductID, req.ActivityID)
+	if err != nil {
+		return nil, err
+	}
+	if record.Quantity+req.Quantity > productInfo.LimitNum {
+		return nil, ErrExceedLimit
+	}
+
+	// 5.1 原子扣减redis库存
+	result, err := uc.Cache.DeductStock(ctx, req.SkuID, req.UserID, int(req.Quantity))
+	if err != nil {
+		uc.log.WithContext(ctx).Errorf("Redis扣库存失败: %v", err)
+		return nil, err
+	}
+	switch result {
+	case -1:
+		uc.log.WithContext(ctx).Warnf("Redis检测到重复购买, user=%d, sku=%d", req.UserID, req.SkuID)
+		return nil, ErrAlreadyBought
+	case 0:
+		uc.log.WithContext(ctx).Warnf("Redis库存不足或商品不存在, sku=%d", req.SkuID)
+		return nil, ErrInsufficientStock
+	case 1:
+	default:
+		uc.log.WithContext(ctx).Errorf("Redis扣库存返回未知结果: %d", result)
+		return nil, fmt.Errorf("扣库存失败")
+	}
+
+	// 6.1 构造MQ消息（异步下单）
+	msg := &mq.SeckillOrderMessage{
+		OrderNo:      generateOrderNo(req.UserID),
+		UserID:       req.UserID,
+		SkuID:        req.SkuID,
+		ActivityID:   req.ActivityID,
+		ProductID:    req.ProductID,
+		Quantity:     int(req.Quantity),
+		AddressID:    req.AddressID,
+		CouponID:     req.CouponID,
+		SeckillPrice: productInfo.SeckillPrice,
+		Version:      productInfo.Version,
+	}
+
+	// 6.2 发送 MQ 消息
+	if err := uc.MQ.Send(ctx, msg); err != nil {
+		// 发送失败，回滚 Redis 库存
+		uc.log.WithContext(ctx).Errorf("发送MQ消息失败: %v", err)
+		uc.Cache.RollbackStock(ctx, req.SkuID, int(req.Quantity))
 		return nil, err
 	}
 
-	return res, nil
+	// 6.3 添加延迟队列（用于超时取消）
+	if err := uc.DelayQueue.Add(ctx, msg.OrderNo, 15*time.Minute); err != nil {
+		uc.log.WithContext(ctx).Errorf("添加延迟队列失败: %v", err)
+		// 不影响主流程，仅记录日志
+	}
+
+	uc.log.WithContext(ctx).Infof("订单创建请求已接收, orderNo=%s, user=%d", msg.OrderNo, req.UserID)
+	return &CreateOrderResult{
+		OrderNo:          msg.OrderNo,
+		OrderAmount:      productInfo.SeckillPrice * uint64(req.Quantity),
+		CouponDiscount:   0,
+		FinalAmount:      productInfo.SeckillPrice * uint64(req.Quantity),
+		Status:           OrderStatusPending,
+		SeckillPrice:     productInfo.SeckillPrice,
+		Quantity:         req.Quantity,
+		RemainingSeconds: OrderTimeoutSeconds,
+		Message:          "排队中，请稍后查询结果",
+	}, nil
 }
 
 // GetSeckillOrder 获取订单信息
@@ -295,7 +304,7 @@ func (uc *SeckillUsecase) PaySeckillOrder(ctx context.Context, req *PayOrderRequ
 	var isTimeout bool
 
 	err := uc.tx.ExecTx(ctx, func(txctx context.Context) error {
-		// 1.获取订单信息
+		// 1.获取订单信息(行锁)
 		order, err := uc.Repo.GetOrderForUpdate(txctx, req.OrderNo)
 		if err != nil {
 			return err
@@ -370,40 +379,15 @@ func (uc *SeckillUsecase) CancelOrder(ctx context.Context, orderNo string, userI
 	return uc.cancelOrder(ctx, orderNo, reason)
 }
 
-// CancelTimeoutOrders 定时取消超时订单
-func (uc *SeckillUsecase) CancelTimeoutOrders(ctx context.Context) error {
-	orders, err := uc.Repo.GetPendingOrders(ctx, OrderTimeoutMinutes)
-	if err != nil {
-		return err
-	}
-
-	if len(orders) == 0 {
-		return nil
-	}
-
-	uc.log.WithContext(ctx).Infof("发现 %d 个超时订单", len(orders))
-	success, fail := 0, 0
-	for _, order := range orders {
-		if err := uc.cancelOrder(ctx, order.OrderNo, "定时任务取消"); err != nil {
-			fail++
-			uc.log.WithContext(ctx).Errorf("取消订单失败: %s, err=%v", order.OrderNo, err)
-		} else {
-			success++
-		}
-	}
-
-	uc.log.WithContext(ctx).Infof("超时订单处理完成: 成功=%d, 失败=%d", success, fail)
-	return nil
-}
-
 // cancelOrder 内部取消订单
 func (uc *SeckillUsecase) cancelOrder(ctx context.Context, orderNo string, reason string) error {
 	return uc.tx.ExecTx(ctx, func(txCtx context.Context) error {
-		// 1.获取订单信息
+		// 1.获取订单信息（带行锁）
 		order, err := uc.Repo.GetOrderForUpdate(txCtx, orderNo)
 		if err != nil {
 			return fmt.Errorf("获取订单失败: %w", err)
 		}
+
 		// 2.检查订单状态（只取消待支付订单）
 		if order.Status != OrderStatusPending {
 			uc.log.WithContext(txCtx).Warnf("订单状态不是待支付，无法取消: %s, status=%d", orderNo, order.Status)
@@ -415,19 +399,29 @@ func (uc *SeckillUsecase) cancelOrder(ctx context.Context, orderNo string, reaso
 			return fmt.Errorf("更新订单状态失败: %w", err)
 		}
 
-		// 4.恢复库存
+		// 4.恢复 MySQL 库存
 		if err := uc.Repo.RestoreStock(txCtx, order.SkuID, uint32(order.Quantity)); err != nil {
-			uc.log.WithContext(txCtx).Errorf("恢复库存失败: orderNo=%s, skuID=%d, quantity=%d, err=%v",
-				orderNo, order.SkuID, order.Quantity, err)
+			uc.log.WithContext(txCtx).Errorf("恢复MySQL库存失败: orderNo=%s, err=%v", orderNo, err)
 		}
 
-		// 5.恢复优惠券（如果使用优惠券）
+		// 5.恢复 Redis 库存
+		if err := uc.Cache.RollbackStock(txCtx, order.SkuID, int(order.Quantity)); err != nil {
+			uc.log.WithContext(txCtx).Errorf("恢复Redis库存失败: orderNo=%s, err=%v", orderNo, err)
+		}
+
+		// 6.删除用户购买标记
+		if err := uc.Cache.RemoveUserBuy(txCtx, order.SkuID, order.UserID); err != nil {
+			uc.log.WithContext(txCtx).Warnf("删除用户购买标记失败: %v", err)
+		}
+
+		// 7.恢复优惠券（如果使用优惠券）
 		if order.CouponID > 0 {
 			if err := uc.Repo.RestoreCoupon(txCtx, order.CouponID); err != nil {
 				uc.log.WithContext(txCtx).Warnf("恢复优惠券失败: orderNo=%s, couponID=%d, err=%v",
 					orderNo, order.CouponID, err)
 			}
 		}
+
 		uc.log.WithContext(ctx).Infof("取消订单成功: %s, 原因: %s", orderNo, reason)
 		return nil
 	})
@@ -441,6 +435,43 @@ func (uc *SeckillUsecase) GetSeckillResult(ctx context.Context, userID uint64, r
 		Status:  0, // 处理中
 		Message: "处理中",
 	}, nil
+}
+
+// WarmUpSeckillCache 预热秒杀缓存
+func (uc *SeckillUsecase) WarmUpSeckillCache(ctx context.Context, activityID uint64) error {
+	uc.log.WithContext(ctx).Infof("开始预热缓存, activity=%d", activityID)
+
+	// 获取活动商品列表
+	products, _, err := uc.Repo.ListSeckillProducts(ctx, activityID, 1, 1000, 0)
+	if err != nil {
+		uc.log.WithContext(ctx).Errorf("获取商品列表失败: %v", err)
+		return err
+	}
+
+	// 转化为缓存
+	cachedProducts := make([]*CachedSeckillProduct, 0, len(products))
+	for _, p := range products {
+		cachedProducts = append(cachedProducts, &CachedSeckillProduct{
+			SkuID:          p.SkuID,
+			ProductID:      p.ProductID,
+			Name:           p.Name,
+			MainImage:      p.MainImage,
+			SeckillPrice:   p.SeckillPrice,
+			MarketPrice:    p.MarketPrice,
+			AvailableStock: p.AvailableStock,
+			TotalStock:     p.TotalStock,
+			LimitNum:       p.LimitNum,
+		})
+	}
+
+	// 批量写入缓存
+	if err := uc.Cache.BatchSetProducts(ctx, cachedProducts); err != nil {
+		uc.log.WithContext(ctx).Errorf("批量写入缓存失败")
+		return err
+	}
+
+	uc.log.WithContext(ctx).Infof("预热缓存完成, 商品数量=%d", len(cachedProducts))
+	return nil
 }
 
 // applyCoupon 应用优惠券，返回最终金额和优惠金额
@@ -519,4 +550,13 @@ func (uc *SeckillUsecase) isOrderTimeout(createTimeStr string) bool {
 // generatePlatformNumber 生成平台流水号
 func (uc *SeckillUsecase) generatePlatformNumber(userID uint64) string {
 	return fmt.Sprintf("P%d%d", time.Now().UnixNano(), userID%1000)
+}
+
+// generateOrderNo 生成订单号
+func generateOrderNo(userID uint64) string {
+	// 格式：时间戳(纳秒) + 用户ID后3位 + 随机数
+	return fmt.Sprintf("%d%d%d",
+		time.Now().UnixNano(),
+		userID%1000,
+		time.Now().UnixNano()%10000)
 }

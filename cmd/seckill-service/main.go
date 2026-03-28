@@ -4,26 +4,17 @@ import (
 	"flag"
 	"os"
 
-	"seckill-service/internal/conf"
-
-	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/config"
 	"github.com/go-kratos/kratos/v2/config/file"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/middleware/tracing"
-	"github.com/go-kratos/kratos/v2/transport/grpc"
-	"github.com/go-kratos/kratos/v2/transport/http"
-
-	_ "go.uber.org/automaxprocs"
+	"seckill-service/internal/conf"
 )
 
 // go build -ldflags "-X main.Version=x.y.z"
 var (
-	// Name is the name of the compiled software.
-	Name string
-	// Version is the version of the compiled software.
-	Version string
-	// flagconf is the config flag.
+	Name     = "seckill-service"
+	Version  string
 	flagconf string
 
 	id, _ = os.Hostname()
@@ -33,23 +24,12 @@ func init() {
 	flag.StringVar(&flagconf, "conf", "../../configs", "config path, eg: -conf config.yaml")
 }
 
-func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server) *kratos.App {
-	return kratos.New(
-		kratos.ID(id),
-		kratos.Name(Name),
-		kratos.Version(Version),
-		kratos.Metadata(map[string]string{}),
-		kratos.Logger(logger),
-		kratos.Server(
-			gs,
-			hs,
-		),
-	)
-}
-
 func main() {
 	flag.Parse()
-	logger := log.With(log.NewStdLogger(os.Stdout),
+
+	// 初始化 logger
+	logger := log.With(
+		log.NewStdLogger(os.Stdout),
 		"ts", log.DefaultTimestamp,
 		"caller", log.DefaultCaller,
 		"service.id", id,
@@ -58,6 +38,8 @@ func main() {
 		"trace.id", tracing.TraceID(),
 		"span.id", tracing.SpanID(),
 	)
+
+	// 加载配置
 	c := config.New(
 		config.WithSource(
 			file.NewSource(flagconf),
@@ -80,7 +62,7 @@ func main() {
 	}
 	defer cleanup()
 
-	// start and wait for stop signal
+	// 启动并阻塞，直到收到退出信号
 	if err := app.Run(); err != nil {
 		panic(err)
 	}

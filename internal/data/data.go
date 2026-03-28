@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/go-kratos/kratos/v2/log"
-	"github.com/google/wire"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	gormLogger "gorm.io/gorm/logger"
@@ -18,9 +17,6 @@ import (
 	productQuery "seckill-service/internal/data/product/query"
 	userQuery "seckill-service/internal/data/user/query"
 )
-
-// ProviderSet is data providers.
-var ProviderSet = wire.NewSet(NewData, NewTransaction, NewSeckillRepo)
 
 // Data .
 type Data struct {
