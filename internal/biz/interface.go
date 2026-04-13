@@ -2,6 +2,7 @@ package biz
 
 import (
 	"context"
+	"seckill-service/internal/mq"
 	"time"
 )
 
@@ -43,9 +44,11 @@ type SeckillRepo interface {
 // CacheRepo 缓存接口(redis)
 type CacheRepo interface {
 	// 商品缓存
-	GetProduct(ctx context.Context, skuID uint64) (*CachedSeckillProduct, error)
-	SetProduct(ctx context.Context, skuID uint64, product *CachedSeckillProduct, ttl int64) error
 	BatchSetProducts(ctx context.Context, products []*CachedSeckillProduct) error
+	GetProductList(ctx context.Context, activityID int64, page, pageSize, sortType int32) (*SeckillProductsResult, error)
+	SetProductList(ctx context.Context, activityID int64, page, pageSize, sortType int32, data *SeckillProductsResult, ttl time.Duration) error
+	GetProductDetail(ctx context.Context, productID, activityID uint64) (*SeckillProductDetail, error)
+	SetProductDetail(ctx context.Context, productID, activityID uint64, detail *SeckillProductDetail, ttl time.Duration) error
 
 	// 库存缓存
 	GetStock(ctx context.Context, skuID uint64) (int64, error)
@@ -53,16 +56,29 @@ type CacheRepo interface {
 	DeductStock(ctx context.Context, skuID, userID uint64, quantity int) (int, error)
 	RollbackStock(ctx context.Context, skuID uint64, quantity int) error // 下单失败、订单超时
 
+	// 活动缓存
+	GetCurrentActivity(ctx context.Context) (*Activity, error)
+	SetCurrentActivity(ctx context.Context, activity *Activity, ttl time.Duration) error
+
 	// 用户购买记录
 	CheckUserBuy(ctx context.Context, skuID, userID uint64) (bool, error)
 	MarkUserBuy(ctx context.Context, skuID, userID uint64, ttl int64) error
 	RemoveUserBuy(ctx context.Context, skuID, userID uint64) error
+
+	// 分布式锁（防止击穿）
+	SetNX(ctx context.Context, key string, value interface{}, ttl time.Duration) (bool, error)
+
+	// 通用缓存方法
+	Get(ctx context.Context, key string) (string, error)
+	Set(ctx context.Context, key, value string, ttl time.Duration) error
+	Del(ctx context.Context, key ...string) error
 }
 
 // CachedSeckillProduct 缓存的秒杀商品
 type CachedSeckillProduct struct {
 	SkuID          uint64 `json:"sku_id"`
 	ProductID      uint64 `json:"product_id"`
+	ActivityID     uint64 `json:"activity_id"`
 	Name           string `json:"name"`
 	MainImage      string `json:"main_image"`
 	SeckillPrice   uint64 `json:"seckill_price"`
@@ -77,8 +93,9 @@ type CachedSeckillProduct struct {
 
 // RateLimiter 限流器接口
 type RateLimiter interface {
-	UserRateLimit(ctx context.Context, userID uint64, limit int, window time.Duration) (bool, error)
-	GlobalRateLimit(ctx context.Context, limit int, window time.Duration) (bool, error)
+	UserRateLimit(ctx context.Context, userID uint64, limit, burst int, window time.Duration) (bool, error)
+	GlobalRateLimit(ctx context.Context, limit, burst int, window time.Duration) (bool, error)
+	ActivityRateLimit(ctx context.Context, activityID uint64, limit, burst int, window time.Duration) (bool, error)
 }
 
 // IdempotentChecker 幂等检查器接口
@@ -89,4 +106,13 @@ type IdempotentChecker interface {
 // DelayQueue 延迟队列接口
 type DelayQueue interface {
 	Add(ctx context.Context, orderNo string, delay time.Duration) error
+}
+
+// MQProducer 消息队列生产者接口
+type MQProducer interface {
+	Send(ctx context.Context, msg *mq.SeckillOrderMessage) error
+	SendAsync(ctx context.Context, msg *mq.SeckillOrderMessage)
+	SendResult(ctx context.Context, result *mq.SeckillResultMessage) error
+	SendToRetry(ctx context.Context, msg *mq.SeckillOrderMessage, retryCount int, delay time.Duration) error
+	SendToDLQ(ctx context.Context, msg *mq.SeckillOrderMessage, reason string, retryCount int) error
 }

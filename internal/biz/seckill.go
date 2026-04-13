@@ -2,6 +2,7 @@ package biz
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/go-kratos/kratos/v2/log"
@@ -22,6 +23,15 @@ const (
 	OrderTimeoutSeconds = OrderTimeoutMinutes * 60 // 订单超时秒数
 )
 
+const (
+	// 缓存Key前缀
+	cacheKeyActivity      = "seckill:activity:current"         // 当前活动
+	cacheKeyProductList   = "seckill:product:list:%d:%d:%d:%d" // 商品列表: activityID:page:size:sort
+	cacheKeyProductDetail = "seckill:product:detail:%d:%d"     // 商品详情: productID:activityID
+	cacheKeyUserBuy       = "seckill:user:buy:%d:%d"           // 用户购买标记: userID:skuID
+	cacheKeyStock         = "seckill:stock:%d"                 // 库存: skuID
+)
+
 // Transaction 事务接口
 type Transaction interface {
 	ExecTx(ctx context.Context, fn func(ctx context.Context) error) error
@@ -32,11 +42,6 @@ type SkuStock struct {
 	ID           uint64
 	SeckillPrice uint64
 	Version      uint32
-}
-
-// 防止循环导入，实现解耦
-type MQProducer interface {
-	Send(ctx context.Context, msg *mq.SeckillOrderMessage) error
 }
 
 type SeckillUsecase struct {
@@ -78,6 +83,17 @@ func (uc *SeckillUsecase) ListSeckillProducts(ctx context.Context, userID, activ
 		}
 	}
 
+	// 只对首页和热门也使用缓存，其他直接查询数据库
+	useCache := page <= 3 && activityID > 0
+
+	if useCache {
+		res, err := uc.Cache.GetProductList(ctx, activityID, page, pageSize, sortType)
+		if err == nil && res != nil {
+			uc.log.WithContext(ctx).Debugf("从缓存加载商品列表: page=%d", page)
+			return res, nil
+		}
+	}
+
 	// 查询商品列表
 	products, total, err := uc.Repo.ListSeckillProducts(ctx, uint64(activityID), page, pageSize, sortType)
 	if err != nil {
@@ -103,19 +119,27 @@ func (uc *SeckillUsecase) ListSeckillProducts(ctx context.Context, userID, activ
 		}
 	}
 
-	return &SeckillProductsResult{
+	result := &SeckillProductsResult{
 		Products: products,
 		Total:    total,
 		Page:     page,
 		PageSize: pageSize,
 		Activity: activityInfo,
-	}, nil
+	}
+
+	// 设置缓存
+	if useCache && result != nil {
+		if err := uc.Cache.SetProductList(ctx, activityID, page, pageSize, sortType, result, 3*time.Minute); err != nil {
+			uc.log.WithContext(ctx).Warnf("设置商品列表缓存失败: %v", err)
+		}
+	}
+
+	return result, nil
 }
 
 // GetSeckillProductDetail 获取秒杀商品详情
 func (uc *SeckillUsecase) GetSeckillProductDetail(ctx context.Context, userID, productID, activityID uint64) (*ProductDetailResult, error) {
-	// 获取商品详情
-	detail, err := uc.Repo.GetSeckillProductDetail(ctx, productID, activityID)
+	detail, err := uc.getProductDetailWithMutex(ctx, productID, activityID)
 	if err != nil {
 		return nil, err
 	}
@@ -127,98 +151,137 @@ func (uc *SeckillUsecase) GetSeckillProductDetail(ctx context.Context, userID, p
 
 	// 如果已经登录，获取秒杀状态
 	if userID > 0 {
-		record, err := uc.Repo.CheckUserBuyRecord(ctx, userID, activityID, productID)
-		if err == nil {
-			status := &UserSeckillStatus{
-				HasBought:      record.HasBought,
-				BoughtQuantity: record.Quantity,
+		// 优先查Redis购买标记
+		hasBought, _ := uc.Cache.CheckUserBuy(ctx, detail.SkuID, userID)
+		if hasBought {
+			res.UserStatus = &UserSeckillStatus{
+				HasBought: true,
+				CanBuy:    false,
+				Message:   "您已参与过该秒杀活动",
 			}
-
-			// 判断是否可购买
-			if detail.ActivityStatus == 0 {
-				status.CanBuy = false
-				status.Message = "活动未开始"
-			} else if detail.ActivityStatus == 2 {
-				status.CanBuy = false
-				status.Message = "活动已结束"
-			} else if detail.AvailableStock <= 0 {
-				status.CanBuy = false
-				status.Message = "商品已售罄"
-			} else if record.HasBought && record.Quantity >= detail.LimitNum {
-				status.CanBuy = false
-				status.Message = "超过限购数量"
-			} else {
-				status.CanBuy = true
-				status.RemainingLimit = detail.LimitNum - record.Quantity
-				status.Message = "可购买"
+		} else {
+			// 查数据库确认
+			record, err := uc.Repo.CheckUserBuyRecord(ctx, userID, activityID, productID)
+			if err == nil {
+				res.UserStatus = uc.buildUserStatus(detail, record)
 			}
-			res.UserStatus = status
 		}
 	}
-
 	return res, nil
+}
+
+// getProductDetailWithMutex 带互斥锁的缓存获取（防缓存击穿）
+func (uc *SeckillUsecase) getProductDetailWithMutex(ctx context.Context, productID, activityID uint64) (*SeckillProductDetail, error) {
+	cacheKey := fmt.Sprintf("seckill:product:%d:%d", productID, activityID)
+
+	// 1. 尝试从缓存获取
+	detail, err := uc.Cache.GetProductDetail(ctx, productID, activityID)
+	if err == nil && detail != nil {
+		return detail, nil
+	}
+
+	// 2. 检查是否是空值缓存（防穿透）
+	cachedData, _ := uc.Cache.Get(ctx, cacheKey)
+	if cachedData == "NULL" {
+		return nil, ErrProductNotFound
+	}
+
+	// 3. 尝试获取分布式锁（防击穿）
+	lockKey := fmt.Sprintf("lock:product:%d:%d", productID, activityID)
+	locked, err := uc.Cache.SetNX(ctx, lockKey, "1", 5*time.Second)
+	if err != nil {
+		uc.log.WithContext(ctx).Warnf("获取分布式锁失败: %v", err)
+		// 获取锁失败，降级到DB查询
+		return uc.Repo.GetSeckillProductDetail(ctx, productID, activityID)
+	}
+
+	if locked {
+		defer uc.Cache.Del(ctx, lockKey)
+
+		// 双重检查
+		detail, err = uc.Cache.GetProductDetail(ctx, productID, activityID)
+		if err == nil && detail != nil {
+			return detail, nil
+		}
+
+		// 查询DB
+		detail, err = uc.Repo.GetSeckillProductDetail(ctx, productID, activityID)
+		if err != nil {
+			if errors.Is(err, ErrProductNotFound) {
+				// 缓存空值，防穿透
+				uc.Cache.Set(ctx, cacheKey, "NULL", 1*time.Minute)
+			}
+			return nil, err
+		}
+
+		// 回填缓存
+		if err := uc.Cache.SetProductDetail(ctx, productID, activityID, detail, 10*time.Minute); err != nil {
+			uc.log.WithContext(ctx).Warnf("设置商品详情缓存失败: %v", err)
+		}
+		return detail, nil
+	}
+
+	// 未获取到锁，短暂等待后重试
+	time.Sleep(50 * time.Millisecond)
+	return uc.getProductDetailWithMutex(ctx, productID, activityID)
 }
 
 // CreateSeckillOrder 创建秒杀订单
 func (uc *SeckillUsecase) CreateSeckillOrder(ctx context.Context, req *CreateOrderRequest) (*CreateOrderResult, error) {
 	// 全局限流
-	allowed, err := uc.Limiter.GlobalRateLimit(ctx, 10000, time.Second)
-	if err != nil {
-		uc.log.WithContext(ctx).Errorf("全局限流检查失败: %v", err)
-		return nil, ErrSystemBusy
-	}
-
-	if !allowed {
-		uc.log.WithContext(ctx).Warnf("全局限流触发, user=%d", req.UserID)
+	allowed, err := uc.Limiter.GlobalRateLimit(ctx, 10000, 20000, time.Second)
+	if err != nil || !allowed {
 		return nil, ErrSystemBusy
 	}
 
 	// 用户限流（防止单个用户刷单）
-	allowed, err = uc.Limiter.UserRateLimit(ctx, req.UserID, 3, time.Second)
-	if err != nil {
-		uc.log.WithContext(ctx).Errorf("用户限流检查失败: %v", err)
-		return nil, ErrTooManyRequests
-	}
-	if !allowed {
-		uc.log.WithContext(ctx).Warnf("用户限流触发, user=%d", req.UserID)
+	allowed, err = uc.Limiter.UserRateLimit(ctx, req.UserID, 3, 3, time.Second)
+	if err != nil || !allowed {
 		return nil, ErrTooManyRequests
 	}
 
 	// 2.1 请求幂等检查（防止重复提交）
 	isFirst, err := uc.Idempotent.CheckAndMark(ctx, req.RequestID, 5*time.Minute)
-	if err != nil {
-		uc.log.WithContext(ctx).Errorf("幂等检查失败: %v", err)
-		return nil, err
-	}
-	if !isFirst {
-		uc.log.WithContext(ctx).Warnf("重复请求, requestId=%s", req.RequestID)
+	if err != nil || !isFirst {
 		return nil, ErrDuplicateRequest
 	}
 
 	// 3.1 获取当前活动
-	activity, _, err := uc.Repo.GetCurrentActivity(ctx)
+	activity, err := uc.getActivityFromCacheWithMutex(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if activity.ID != req.ActivityID {
+	if activity == nil || activity.ID != req.ActivityID {
 		return nil, ErrNoActiveActivity
 	}
 
-	// 4.1 检查用户是否已购买（一人一单）
+	allowed, err = uc.Limiter.ActivityRateLimit(ctx, activity.ID, 8000, 0, time.Second)
+	if err != nil || !allowed {
+		return nil, ErrSystemBusy
+	}
+
+	// 4.1 获取商品详情，检查限购
+	productInfo, err := uc.getProductDetailWithMutex(ctx, req.ProductID, req.ActivityID)
+	if err != nil {
+		return nil, err
+	}
+	// 4.2 检查用户是否已购买（一人一单）
+	hasBought, err := uc.Cache.CheckUserBuy(ctx, req.SkuID, req.UserID)
+	if err == nil && hasBought {
+		uc.log.WithContext(ctx).Warnf("用户已购买(Redis), user=%d, sku=%d", req.UserID, req.SkuID)
+		return nil, ErrAlreadyBought
+	}
 	record, err := uc.Repo.CheckUserBuyRecord(ctx, req.UserID, req.ActivityID, req.ProductID)
 	if err != nil {
 		return nil, err
 	}
 	if record.HasBought {
-		uc.log.WithContext(ctx).Warnf("用户已购买, user=%d, product=%d", req.UserID, req.ProductID)
+		uc.Cache.MarkUserBuy(ctx, req.SkuID, req.UserID, 3600)
 		return nil, ErrAlreadyBought
 	}
-	// 4.2 获取商品详情，检查限购
-	productInfo, err := uc.Repo.GetSeckillProductDetail(ctx, req.ProductID, req.ActivityID)
-	if err != nil {
-		return nil, err
-	}
-	if record.Quantity+req.Quantity > productInfo.LimitNum {
+
+	// 限购检查
+	if record.Quantity+req.Quantity > int64(productInfo.LimitNum) {
 		return nil, ErrExceedLimit
 	}
 
@@ -269,6 +332,7 @@ func (uc *SeckillUsecase) CreateSeckillOrder(ctx context.Context, req *CreateOrd
 		// 不影响主流程，仅记录日志
 	}
 
+	uc.Cache.MarkUserBuy(ctx, req.SkuID, req.UserID, 3600)
 	uc.log.WithContext(ctx).Infof("订单创建请求已接收, orderNo=%s, user=%d", msg.OrderNo, req.UserID)
 	return &CreateOrderResult{
 		OrderNo:          msg.OrderNo,
@@ -281,6 +345,62 @@ func (uc *SeckillUsecase) CreateSeckillOrder(ctx context.Context, req *CreateOrd
 		RemainingSeconds: OrderTimeoutSeconds,
 		Message:          "排队中，请稍后查询结果",
 	}, nil
+}
+
+func (uc *SeckillUsecase) getActivityFromCacheWithMutex(ctx context.Context) (*Activity, error) {
+	cacheKey := cacheKeyActivity
+
+	// 尝试从缓存获取
+	cachedData, err := uc.Cache.Get(ctx, cacheKey)
+	if err == nil && cachedData != "" {
+		if cachedData == "NULL" {
+			return nil, ErrNoActiveActivity
+		}
+		var activity Activity
+		if err := json.Unmarshal([]byte(cachedData), &activity); err == nil {
+			return &activity, nil
+		}
+	}
+
+	// 尝试获取分布式锁
+	lockKey := cacheKey + ":lock"
+	locked, err := uc.Cache.SetNX(ctx, lockKey, "1", 3*time.Second)
+	if err != nil {
+		activity, _, err := uc.Repo.GetCurrentActivity(ctx)
+		return activity, err
+	}
+
+	if locked {
+		defer uc.Cache.Del(ctx, lockKey)
+
+		// 双重检查
+		cachedData, err = uc.Cache.Get(ctx, cacheKey)
+		if err == nil && cachedData != "" && cachedData != "NULL" {
+			var activity Activity
+			if err := json.Unmarshal([]byte(cachedData), &activity); err == nil {
+				return &activity, nil
+			}
+		}
+
+		// 查DB
+		activity, _, err := uc.Repo.GetCurrentActivity(ctx)
+		if err != nil {
+			if errors.Is(err, ErrNoActiveActivity) {
+				uc.Cache.Set(ctx, cacheKey, "NULL", 30*time.Second)
+			}
+			return nil, err
+		}
+
+		// 回填缓存
+		if data, err := json.Marshal(activity); err == nil {
+			uc.Cache.Set(ctx, cacheKey, string(data), 30*time.Second)
+		}
+		return activity, nil
+	}
+
+	// 未获取到锁，短暂等待后重试
+	time.Sleep(30 * time.Millisecond)
+	return uc.getActivityFromCacheWithMutex(ctx)
 }
 
 // GetSeckillOrder 获取订单信息
@@ -365,6 +485,27 @@ func (uc *SeckillUsecase) PaySeckillOrder(ctx context.Context, req *PayOrderRequ
 	return result, nil
 }
 
+// InvalidateProductCache 主动失效商品缓存（商品信息更新时调用）
+func (uc *SeckillUsecase) InvalidateProductCache(ctx context.Context, productID, activityID uint64) error {
+	cacheKey := fmt.Sprintf("seckill:product:%d:%d", productID, activityID)
+	if err := uc.Cache.Del(ctx, cacheKey); err != nil {
+		uc.log.WithContext(ctx).Warnf("删除商品缓存失败: key=%s, err=%v", cacheKey, err)
+		return err
+	}
+	uc.log.WithContext(ctx).Debugf("商品缓存已失效: productID=%d, activityID=%d", productID, activityID)
+	return nil
+}
+
+// InvalidateActivityCache 主动失效活动缓存
+func (uc *SeckillUsecase) InvalidateActivityCache(ctx context.Context) error {
+	if err := uc.Cache.Del(ctx, cacheKeyActivity); err != nil {
+		uc.log.WithContext(ctx).Warnf("删除活动缓存失败: %v", err)
+		return err
+	}
+	uc.log.WithContext(ctx).Debug("活动缓存已失效")
+	return nil
+}
+
 // CancelOrder 取消订单
 func (uc *SeckillUsecase) CancelOrder(ctx context.Context, orderNo string, userID uint64, reason string) error {
 	// 获取订单信息验证权限
@@ -442,7 +583,7 @@ func (uc *SeckillUsecase) WarmUpSeckillCache(ctx context.Context, activityID uin
 	uc.log.WithContext(ctx).Infof("开始预热缓存, activity=%d", activityID)
 
 	// 获取活动商品列表
-	products, _, err := uc.Repo.ListSeckillProducts(ctx, activityID, 1, 1000, 0)
+	products, _, err := uc.Repo.ListSeckillProducts(ctx, activityID, 1, 100, 0)
 	if err != nil {
 		uc.log.WithContext(ctx).Errorf("获取商品列表失败: %v", err)
 		return err
@@ -451,23 +592,40 @@ func (uc *SeckillUsecase) WarmUpSeckillCache(ctx context.Context, activityID uin
 	// 转化为缓存
 	cachedProducts := make([]*CachedSeckillProduct, 0, len(products))
 	for _, p := range products {
+		detail, err := uc.Repo.GetSeckillProductDetail(ctx, p.ProductID, activityID)
+		if err != nil {
+			uc.log.WithContext(ctx).Warnf("获取商品详情失败: productID=%d, err=%v", p.ProductID, err)
+			continue
+		}
+
 		cachedProducts = append(cachedProducts, &CachedSeckillProduct{
 			SkuID:          p.SkuID,
 			ProductID:      p.ProductID,
-			Name:           p.Name,
-			MainImage:      p.MainImage,
-			SeckillPrice:   p.SeckillPrice,
-			MarketPrice:    p.MarketPrice,
-			AvailableStock: p.AvailableStock,
-			TotalStock:     p.TotalStock,
-			LimitNum:       p.LimitNum,
+			ActivityID:     activityID, // 添加活动ID
+			Name:           detail.Name,
+			MainImage:      detail.MainImage,
+			SeckillPrice:   detail.SeckillPrice,
+			MarketPrice:    detail.MarketPrice,
+			AvailableStock: detail.AvailableStock,
+			TotalStock:     detail.TotalStock,
+			LimitNum:       detail.LimitNum,
+			StartTime:      detail.StartTime,
+			EndTime:        detail.EndTime,
+			ActivityStatus: detail.ActivityStatus,
 		})
 	}
-
-	// 批量写入缓存
+	// 使用批量接口预热（一次Pipeline完成）
 	if err := uc.Cache.BatchSetProducts(ctx, cachedProducts); err != nil {
-		uc.log.WithContext(ctx).Errorf("批量写入缓存失败")
+		uc.log.WithContext(ctx).Errorf("批量预热缓存失败: %v", err)
 		return err
+	}
+
+	// 预热活动信息
+	activity, _, err := uc.Repo.GetCurrentActivity(ctx)
+	if err == nil && activity != nil {
+		if err := uc.Cache.SetCurrentActivity(ctx, activity, 30*time.Second); err != nil {
+			uc.log.WithContext(ctx).Warnf("预热活动信息失败: %v", err)
+		}
 	}
 
 	uc.log.WithContext(ctx).Infof("预热缓存完成, 商品数量=%d", len(cachedProducts))

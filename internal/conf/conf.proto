@@ -8,6 +8,7 @@ import "google/protobuf/duration.proto";
 message Bootstrap {
   Server server = 1;
   Data data = 2;
+  Kafka kafka = 3;
 }
 
 message Server {
@@ -42,4 +43,41 @@ message Data {
   Database core_db = 3;
   Database pay_db = 4;
   Redis redis = 5;
+}
+
+message Kafka {
+  repeated string brokers = 1;
+  string version = 2;
+  string consumer_group = 3;
+  string client_id = 4;
+
+  // Producer 配置
+  message Producer {
+    int32 max_message_bytes = 1;
+    int32 required_acks = 2;
+    string compression = 3;
+    int32 retry_max = 4;
+    google.protobuf.Duration retry_backoff = 5;
+    google.protobuf.Duration timeout = 6;
+  }
+  Producer producer = 5;
+
+  // Consumer 配置
+  message Consumer {
+    google.protobuf.Duration session_timeout = 1;
+    google.protobuf.Duration heartbeat_interval = 2;
+    google.protobuf.Duration max_processing_time = 3;
+    int32 fetch_min_bytes = 4;
+    int32 fetch_max_bytes = 5;
+    google.protobuf.Duration max_wait_time = 6;
+  }
+  Consumer consumer = 6;
+  // 主题配置
+  message Topics {
+    string seckill_order = 1;  // 秒杀订单主Topic
+    string seckill_result = 2;  // 秒杀结果Topic
+    string seckill_dlq = 3;  // 死信队列Topic
+    string seckill_retry = 4;  // 重试队列Topic（延迟队列）
+  }
+  Topics topics = 7;
 }

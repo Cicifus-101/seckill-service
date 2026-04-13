@@ -100,18 +100,24 @@ type Coupon struct {
 
 // Order 创建订单参数
 type Order struct {
-	UserID       uint64
-	ActivityID   uint64
-	ProductID    uint64
-	SkuID        uint64
-	ProductName  string
-	ProductImage string
-	SeckillPrice uint64
-	Quantity     int64
-	OrderAmount  uint64
-	CouponID     uint64
-	AddressID    uint64
+	OrderNo        string
+	UserID         uint64
+	ActivityID     uint64
+	ProductID      uint64
+	SkuID          uint64
+	ProductName    string
+	ProductImage   string
+	SeckillPrice   uint64
+	Quantity       int64
+	OrderAmount    uint64
+	CouponID       uint64
+	CouponDiscount uint64
+	FinalAmount    uint64
+	AddressID      uint64
+	Status         OrderStatus
 }
+
+type OrderStatus int
 
 // OrderInfo 订单信息
 type OrderInfo struct {

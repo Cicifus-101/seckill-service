@@ -3,7 +3,6 @@ package repo
 import (
 	"context"
 	"errors"
-	"fmt"
 	"seckill-service/internal/data"
 	"strings"
 	"time"
@@ -16,6 +15,11 @@ import (
 	coreModel "seckill-service/internal/data/core/model"
 	payModel "seckill-service/internal/data/pay/model"
 	productModel "seckill-service/internal/data/product/model"
+)
+
+const (
+	delayQueueKey = "delay:orders"
+	maxRetry      = 3
 )
 
 type mysqlRepo struct {
@@ -466,8 +470,7 @@ func (r *mysqlRepo) RestoreCoupon(ctx context.Context, couponID uint64) error {
 func (r *mysqlRepo) CreateOrder(ctx context.Context, order *biz.Order) (string, error) {
 	q := r.data.GetCoreQuery(ctx)
 
-	// 生成订单号
-	orderNo := fmt.Sprintf("%d%d", time.Now().UnixNano(), order.UserID%1000)
+	orderNo := order.OrderNo
 	quantity := uint32(order.Quantity)
 
 	modelOrder := &coreModel.SeckillOrder{

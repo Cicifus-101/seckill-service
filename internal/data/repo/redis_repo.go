@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -40,47 +41,82 @@ func NewRedisRepo(rdb *redis.Client, logger log.Logger) biz.CacheRepo {
 	}
 }
 
-// GetProduct 获取商品缓存
-func (r *redisRepo) GetProduct(ctx context.Context, skuID uint64) (*biz.CachedSeckillProduct, error) {
-	key := fmt.Sprintf("seckill:sku:%d", skuID)
-	data, err := r.rdb.Get(ctx, key).Bytes()
-	if err == redis.Nil {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	var product biz.CachedSeckillProduct
-	if err := json.Unmarshal(data, &product); err != nil {
-		return nil, err
-	}
-	return &product, nil
-}
-
-// SetProduct 设置商品缓存
-func (r *redisRepo) SetProduct(ctx context.Context, skuID uint64, product *biz.CachedSeckillProduct, ttl int64) error {
-	key := fmt.Sprintf("seckill:sku:%d", skuID) //这里面对redis的大key问题
-	data, err := json.Marshal(product)
-	if err != nil {
-		return err
-	}
-	return r.rdb.SetEX(ctx, key, data, time.Duration(ttl)*time.Second).Err()
-}
-
 // BatchSetProducts 批量设置商品缓存（预热）
 func (r *redisRepo) BatchSetProducts(ctx context.Context, products []*biz.CachedSeckillProduct) error {
+	if len(products) == 0 {
+		return nil
+	}
+	r.log.WithContext(ctx).Infof("开始批量预热缓存, 商品数量=%d", len(products))
+	// 分批处理，避免一次性发送过多命令（每批500个）
+	batchSize := 500
+	totalBatches := (len(products) + batchSize - 1) / batchSize
+
+	for i := 0; i < len(products); i += batchSize {
+		end := i + batchSize
+		if end > len(products) {
+			end = len(products)
+		}
+
+		batchNum := i/batchSize + 1
+		if err := r.batchSetProducts(ctx, products[i:end]); err != nil {
+			r.log.WithContext(ctx).Warnf("批量预热第%d/%d批失败: %v", batchNum, totalBatches, err)
+			// 继续处理剩余批次，不中断整个预热流程
+			continue
+		}
+		r.log.WithContext(ctx).Debugf("批量预热第%d/%d批完成", batchNum, totalBatches)
+	}
+
+	r.log.WithContext(ctx).Infof("批量预热完成, 商品数量=%d", len(products))
+	return nil
+}
+
+// 批量设置商品缓存
+func (r *redisRepo) batchSetProducts(ctx context.Context, products []*biz.CachedSeckillProduct) error {
 	pipe := r.rdb.Pipeline()
 	for _, p := range products {
-		key := fmt.Sprintf("seckill:sku:%d", p.SkuID)
-		data, _ := json.Marshal(p)
-		pipe.SetEX(ctx, key, data, 2*time.Hour)
+		key := fmt.Sprintf("seckill:product:%d:%d", p.ProductID, p.ActivityID)
+		data, err := json.Marshal(p)
+		if err != nil {
+			r.log.WithContext(ctx).Warnf("序列化商品失败: skuID=%d, err=%v", p.SkuID, err)
+			continue
+		}
+		// 防止雪崩
+		ttl := time.Duration(2*3600+rand.Int63n(600)) * time.Second
+		pipe.SetEX(ctx, key, data, ttl)
 
 		stockKey := fmt.Sprintf("seckill:stock:%d", p.SkuID)
 		pipe.Set(ctx, stockKey, p.AvailableStock, 0)
 	}
 	_, err := pipe.Exec(ctx)
 	return err
+}
+
+func (r *redisRepo) GetProductList(ctx context.Context, activityID int64, page, pageSize, sortType int32) (*biz.SeckillProductsResult, error) {
+	key := fmt.Sprintf("seckill:products:activity:%d:page:%d:size:%d:sort:%d",
+		activityID, page, pageSize, sortType)
+
+	data, err := r.rdb.Get(ctx, key).Bytes()
+	if err != nil {
+		return nil, err
+	}
+
+	var result biz.SeckillProductsResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (r *redisRepo) SetProductList(ctx context.Context, activityID int64, page, pageSize, sortType int32, data *biz.SeckillProductsResult, ttl time.Duration) error {
+	key := fmt.Sprintf("seckill:products:activity:%d:page:%d:size:%d:sort:%d",
+		activityID, page, pageSize, sortType)
+
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	ttl = addRandomJitter(ttl)
+	return r.rdb.SetEX(ctx, key, jsonData, ttl).Err()
 }
 
 // GetStock 获取库存
@@ -131,4 +167,88 @@ func (r *redisRepo) MarkUserBuy(ctx context.Context, skuID, userID uint64, ttl i
 func (r *redisRepo) RemoveUserBuy(ctx context.Context, skuID, userID uint64) error {
 	key := fmt.Sprintf("seckill:user:%d:%d", skuID, userID)
 	return r.rdb.Del(ctx, key).Err()
+}
+
+// GetCurrentActivity 获取当前活动
+func (r *redisRepo) GetCurrentActivity(ctx context.Context) (*biz.Activity, error) {
+	key := "seckill:current:activity"
+	data, err := r.rdb.Get(ctx, key).Bytes()
+	if err != nil {
+		return nil, err
+	}
+
+	var activity biz.Activity
+	if err := json.Unmarshal(data, &activity); err != nil {
+		return nil, err
+	}
+	return &activity, nil
+}
+
+// SetCurrentActivity 设置当前活动
+func (r *redisRepo) SetCurrentActivity(ctx context.Context, activity *biz.Activity, ttl time.Duration) error {
+	key := "seckill:current:activity"
+	data, err := json.Marshal(activity)
+	if err != nil {
+		return err
+	}
+	return r.rdb.SetEX(ctx, key, data, ttl).Err()
+}
+
+// GetProductDetail 获取商品详情缓存
+func (r *redisRepo) GetProductDetail(ctx context.Context, productID, activityID uint64) (*biz.SeckillProductDetail, error) {
+	key := fmt.Sprintf("seckill:product:%d:%d", productID, activityID)
+	data, err := r.rdb.Get(ctx, key).Bytes()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var product biz.SeckillProductDetail
+	if err := json.Unmarshal(data, &product); err != nil {
+		return nil, err
+	}
+	return &product, nil
+}
+
+// SetProductDetail 设置商品详情缓存
+func (r *redisRepo) SetProductDetail(ctx context.Context, productID, activityID uint64, detail *biz.SeckillProductDetail, ttl time.Duration) error {
+	key := fmt.Sprintf("seckill:product:%d:%d", productID, activityID)
+	data, err := json.Marshal(detail)
+	if err != nil {
+		return err
+	}
+	ttl = addRandomJitter(ttl)
+	return r.rdb.SetEX(ctx, key, data, ttl).Err()
+}
+
+// Get 通用获取缓存
+func (r *redisRepo) Get(ctx context.Context, key string) (string, error) {
+	return r.rdb.Get(ctx, key).Result()
+}
+
+// Set 通用设置缓存
+func (r *redisRepo) Set(ctx context.Context, key string, value string, ttl time.Duration) error {
+	return r.rdb.SetEX(ctx, key, value, ttl).Err()
+}
+
+// Del 通用删除缓存
+func (r *redisRepo) Del(ctx context.Context, keys ...string) error {
+	return r.rdb.Del(ctx, keys...).Err()
+}
+
+func (r *redisRepo) SetNX(ctx context.Context, key string, value interface{}, ttl time.Duration) (bool, error) {
+	return r.rdb.SetNX(ctx, key, value, ttl).Result()
+}
+
+// addRandomJitter 添加随机TTL偏移，防止缓存雪崩
+func addRandomJitter(baseTTL time.Duration) time.Duration {
+	// 随机偏移 ±10%
+	jitter := time.Duration(rand.Int63n(int64(baseTTL/5))) - baseTTL/10
+	result := baseTTL + jitter
+	if result < 0 {
+		result = baseTTL
+	}
+	return result
 }

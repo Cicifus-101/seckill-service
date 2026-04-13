@@ -26,6 +26,7 @@ type Bootstrap struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Server        *Server                `protobuf:"bytes,1,opt,name=server,proto3" json:"server,omitempty"`
 	Data          *Data                  `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
+	Kafka         *Kafka                 `protobuf:"bytes,3,opt,name=kafka,proto3" json:"kafka,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -70,6 +71,13 @@ func (x *Bootstrap) GetServer() *Server {
 func (x *Bootstrap) GetData() *Data {
 	if x != nil {
 		return x.Data
+	}
+	return nil
+}
+
+func (x *Bootstrap) GetKafka() *Kafka {
+	if x != nil {
+		return x.Kafka
 	}
 	return nil
 }
@@ -202,6 +210,98 @@ func (x *Data) GetRedis() *Data_Redis {
 	return nil
 }
 
+type Kafka struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Brokers       []string               `protobuf:"bytes,1,rep,name=brokers,proto3" json:"brokers,omitempty"`
+	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	ConsumerGroup string                 `protobuf:"bytes,3,opt,name=consumer_group,json=consumerGroup,proto3" json:"consumer_group,omitempty"`
+	ClientId      string                 `protobuf:"bytes,4,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	Producer      *Kafka_Producer        `protobuf:"bytes,5,opt,name=producer,proto3" json:"producer,omitempty"`
+	Consumer      *Kafka_Consumer        `protobuf:"bytes,6,opt,name=consumer,proto3" json:"consumer,omitempty"`
+	Topics        *Kafka_Topics          `protobuf:"bytes,7,opt,name=topics,proto3" json:"topics,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Kafka) Reset() {
+	*x = Kafka{}
+	mi := &file_conf_conf_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Kafka) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Kafka) ProtoMessage() {}
+
+func (x *Kafka) ProtoReflect() protoreflect.Message {
+	mi := &file_conf_conf_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Kafka.ProtoReflect.Descriptor instead.
+func (*Kafka) Descriptor() ([]byte, []int) {
+	return file_conf_conf_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *Kafka) GetBrokers() []string {
+	if x != nil {
+		return x.Brokers
+	}
+	return nil
+}
+
+func (x *Kafka) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *Kafka) GetConsumerGroup() string {
+	if x != nil {
+		return x.ConsumerGroup
+	}
+	return ""
+}
+
+func (x *Kafka) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
+func (x *Kafka) GetProducer() *Kafka_Producer {
+	if x != nil {
+		return x.Producer
+	}
+	return nil
+}
+
+func (x *Kafka) GetConsumer() *Kafka_Consumer {
+	if x != nil {
+		return x.Consumer
+	}
+	return nil
+}
+
+func (x *Kafka) GetTopics() *Kafka_Topics {
+	if x != nil {
+		return x.Topics
+	}
+	return nil
+}
+
 type Server_HTTP struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Network       string                 `protobuf:"bytes,1,opt,name=network,proto3" json:"network,omitempty"`
@@ -213,7 +313,7 @@ type Server_HTTP struct {
 
 func (x *Server_HTTP) Reset() {
 	*x = Server_HTTP{}
-	mi := &file_conf_conf_proto_msgTypes[3]
+	mi := &file_conf_conf_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -225,7 +325,7 @@ func (x *Server_HTTP) String() string {
 func (*Server_HTTP) ProtoMessage() {}
 
 func (x *Server_HTTP) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_conf_proto_msgTypes[3]
+	mi := &file_conf_conf_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -273,7 +373,7 @@ type Server_GRPC struct {
 
 func (x *Server_GRPC) Reset() {
 	*x = Server_GRPC{}
-	mi := &file_conf_conf_proto_msgTypes[4]
+	mi := &file_conf_conf_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -285,7 +385,7 @@ func (x *Server_GRPC) String() string {
 func (*Server_GRPC) ProtoMessage() {}
 
 func (x *Server_GRPC) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_conf_proto_msgTypes[4]
+	mi := &file_conf_conf_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -332,7 +432,7 @@ type Data_Database struct {
 
 func (x *Data_Database) Reset() {
 	*x = Data_Database{}
-	mi := &file_conf_conf_proto_msgTypes[5]
+	mi := &file_conf_conf_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -344,7 +444,7 @@ func (x *Data_Database) String() string {
 func (*Data_Database) ProtoMessage() {}
 
 func (x *Data_Database) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_conf_proto_msgTypes[5]
+	mi := &file_conf_conf_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -387,7 +487,7 @@ type Data_Redis struct {
 
 func (x *Data_Redis) Reset() {
 	*x = Data_Redis{}
-	mi := &file_conf_conf_proto_msgTypes[6]
+	mi := &file_conf_conf_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -399,7 +499,7 @@ func (x *Data_Redis) String() string {
 func (*Data_Redis) ProtoMessage() {}
 
 func (x *Data_Redis) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_conf_proto_msgTypes[6]
+	mi := &file_conf_conf_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -450,15 +550,255 @@ func (x *Data_Redis) GetWriteTimeout() *durationpb.Duration {
 	return nil
 }
 
+// Producer 配置
+type Kafka_Producer struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	MaxMessageBytes int32                  `protobuf:"varint,1,opt,name=max_message_bytes,json=maxMessageBytes,proto3" json:"max_message_bytes,omitempty"`
+	RequiredAcks    int32                  `protobuf:"varint,2,opt,name=required_acks,json=requiredAcks,proto3" json:"required_acks,omitempty"`
+	Compression     string                 `protobuf:"bytes,3,opt,name=compression,proto3" json:"compression,omitempty"`
+	RetryMax        int32                  `protobuf:"varint,4,opt,name=retry_max,json=retryMax,proto3" json:"retry_max,omitempty"`
+	RetryBackoff    *durationpb.Duration   `protobuf:"bytes,5,opt,name=retry_backoff,json=retryBackoff,proto3" json:"retry_backoff,omitempty"`
+	Timeout         *durationpb.Duration   `protobuf:"bytes,6,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *Kafka_Producer) Reset() {
+	*x = Kafka_Producer{}
+	mi := &file_conf_conf_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Kafka_Producer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Kafka_Producer) ProtoMessage() {}
+
+func (x *Kafka_Producer) ProtoReflect() protoreflect.Message {
+	mi := &file_conf_conf_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Kafka_Producer.ProtoReflect.Descriptor instead.
+func (*Kafka_Producer) Descriptor() ([]byte, []int) {
+	return file_conf_conf_proto_rawDescGZIP(), []int{3, 0}
+}
+
+func (x *Kafka_Producer) GetMaxMessageBytes() int32 {
+	if x != nil {
+		return x.MaxMessageBytes
+	}
+	return 0
+}
+
+func (x *Kafka_Producer) GetRequiredAcks() int32 {
+	if x != nil {
+		return x.RequiredAcks
+	}
+	return 0
+}
+
+func (x *Kafka_Producer) GetCompression() string {
+	if x != nil {
+		return x.Compression
+	}
+	return ""
+}
+
+func (x *Kafka_Producer) GetRetryMax() int32 {
+	if x != nil {
+		return x.RetryMax
+	}
+	return 0
+}
+
+func (x *Kafka_Producer) GetRetryBackoff() *durationpb.Duration {
+	if x != nil {
+		return x.RetryBackoff
+	}
+	return nil
+}
+
+func (x *Kafka_Producer) GetTimeout() *durationpb.Duration {
+	if x != nil {
+		return x.Timeout
+	}
+	return nil
+}
+
+// Consumer 配置
+type Kafka_Consumer struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	SessionTimeout    *durationpb.Duration   `protobuf:"bytes,1,opt,name=session_timeout,json=sessionTimeout,proto3" json:"session_timeout,omitempty"`
+	HeartbeatInterval *durationpb.Duration   `protobuf:"bytes,2,opt,name=heartbeat_interval,json=heartbeatInterval,proto3" json:"heartbeat_interval,omitempty"`
+	MaxProcessingTime *durationpb.Duration   `protobuf:"bytes,3,opt,name=max_processing_time,json=maxProcessingTime,proto3" json:"max_processing_time,omitempty"`
+	FetchMinBytes     int32                  `protobuf:"varint,4,opt,name=fetch_min_bytes,json=fetchMinBytes,proto3" json:"fetch_min_bytes,omitempty"`
+	FetchMaxBytes     int32                  `protobuf:"varint,5,opt,name=fetch_max_bytes,json=fetchMaxBytes,proto3" json:"fetch_max_bytes,omitempty"`
+	MaxWaitTime       *durationpb.Duration   `protobuf:"bytes,6,opt,name=max_wait_time,json=maxWaitTime,proto3" json:"max_wait_time,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *Kafka_Consumer) Reset() {
+	*x = Kafka_Consumer{}
+	mi := &file_conf_conf_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Kafka_Consumer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Kafka_Consumer) ProtoMessage() {}
+
+func (x *Kafka_Consumer) ProtoReflect() protoreflect.Message {
+	mi := &file_conf_conf_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Kafka_Consumer.ProtoReflect.Descriptor instead.
+func (*Kafka_Consumer) Descriptor() ([]byte, []int) {
+	return file_conf_conf_proto_rawDescGZIP(), []int{3, 1}
+}
+
+func (x *Kafka_Consumer) GetSessionTimeout() *durationpb.Duration {
+	if x != nil {
+		return x.SessionTimeout
+	}
+	return nil
+}
+
+func (x *Kafka_Consumer) GetHeartbeatInterval() *durationpb.Duration {
+	if x != nil {
+		return x.HeartbeatInterval
+	}
+	return nil
+}
+
+func (x *Kafka_Consumer) GetMaxProcessingTime() *durationpb.Duration {
+	if x != nil {
+		return x.MaxProcessingTime
+	}
+	return nil
+}
+
+func (x *Kafka_Consumer) GetFetchMinBytes() int32 {
+	if x != nil {
+		return x.FetchMinBytes
+	}
+	return 0
+}
+
+func (x *Kafka_Consumer) GetFetchMaxBytes() int32 {
+	if x != nil {
+		return x.FetchMaxBytes
+	}
+	return 0
+}
+
+func (x *Kafka_Consumer) GetMaxWaitTime() *durationpb.Duration {
+	if x != nil {
+		return x.MaxWaitTime
+	}
+	return nil
+}
+
+// 主题配置
+type Kafka_Topics struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SeckillOrder  string                 `protobuf:"bytes,1,opt,name=seckill_order,json=seckillOrder,proto3" json:"seckill_order,omitempty"`    // 秒杀订单主Topic
+	SeckillResult string                 `protobuf:"bytes,2,opt,name=seckill_result,json=seckillResult,proto3" json:"seckill_result,omitempty"` // 秒杀结果Topic
+	SeckillDlq    string                 `protobuf:"bytes,3,opt,name=seckill_dlq,json=seckillDlq,proto3" json:"seckill_dlq,omitempty"`          // 死信队列Topic
+	SeckillRetry  string                 `protobuf:"bytes,4,opt,name=seckill_retry,json=seckillRetry,proto3" json:"seckill_retry,omitempty"`    // 重试队列Topic（延迟队列）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Kafka_Topics) Reset() {
+	*x = Kafka_Topics{}
+	mi := &file_conf_conf_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Kafka_Topics) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Kafka_Topics) ProtoMessage() {}
+
+func (x *Kafka_Topics) ProtoReflect() protoreflect.Message {
+	mi := &file_conf_conf_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Kafka_Topics.ProtoReflect.Descriptor instead.
+func (*Kafka_Topics) Descriptor() ([]byte, []int) {
+	return file_conf_conf_proto_rawDescGZIP(), []int{3, 2}
+}
+
+func (x *Kafka_Topics) GetSeckillOrder() string {
+	if x != nil {
+		return x.SeckillOrder
+	}
+	return ""
+}
+
+func (x *Kafka_Topics) GetSeckillResult() string {
+	if x != nil {
+		return x.SeckillResult
+	}
+	return ""
+}
+
+func (x *Kafka_Topics) GetSeckillDlq() string {
+	if x != nil {
+		return x.SeckillDlq
+	}
+	return ""
+}
+
+func (x *Kafka_Topics) GetSeckillRetry() string {
+	if x != nil {
+		return x.SeckillRetry
+	}
+	return ""
+}
+
 var File_conf_conf_proto protoreflect.FileDescriptor
 
 const file_conf_conf_proto_rawDesc = "" +
 	"\n" +
 	"\x0fconf/conf.proto\x12\n" +
-	"kratos.api\x1a\x1egoogle/protobuf/duration.proto\"]\n" +
+	"kratos.api\x1a\x1egoogle/protobuf/duration.proto\"\x86\x01\n" +
 	"\tBootstrap\x12*\n" +
 	"\x06server\x18\x01 \x01(\v2\x12.kratos.api.ServerR\x06server\x12$\n" +
-	"\x04data\x18\x02 \x01(\v2\x10.kratos.api.DataR\x04data\"\xb8\x02\n" +
+	"\x04data\x18\x02 \x01(\v2\x10.kratos.api.DataR\x04data\x12'\n" +
+	"\x05kafka\x18\x03 \x01(\v2\x11.kratos.api.KafkaR\x05kafka\"\xb8\x02\n" +
 	"\x06Server\x12+\n" +
 	"\x04http\x18\x01 \x01(\v2\x17.kratos.api.Server.HTTPR\x04http\x12+\n" +
 	"\x04grpc\x18\x02 \x01(\v2\x17.kratos.api.Server.GRPCR\x04grpc\x1ai\n" +
@@ -485,7 +825,35 @@ const file_conf_conf_proto_rawDesc = "" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x0e\n" +
 	"\x02db\x18\x03 \x01(\x05R\x02db\x12<\n" +
 	"\fread_timeout\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\vreadTimeout\x12>\n" +
-	"\rwrite_timeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\fwriteTimeoutB$Z\"seckill-service/internal/conf;confb\x06proto3"
+	"\rwrite_timeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\fwriteTimeout\"\xc5\b\n" +
+	"\x05Kafka\x12\x18\n" +
+	"\abrokers\x18\x01 \x03(\tR\abrokers\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12%\n" +
+	"\x0econsumer_group\x18\x03 \x01(\tR\rconsumerGroup\x12\x1b\n" +
+	"\tclient_id\x18\x04 \x01(\tR\bclientId\x126\n" +
+	"\bproducer\x18\x05 \x01(\v2\x1a.kratos.api.Kafka.ProducerR\bproducer\x126\n" +
+	"\bconsumer\x18\x06 \x01(\v2\x1a.kratos.api.Kafka.ConsumerR\bconsumer\x120\n" +
+	"\x06topics\x18\a \x01(\v2\x18.kratos.api.Kafka.TopicsR\x06topics\x1a\x8f\x02\n" +
+	"\bProducer\x12*\n" +
+	"\x11max_message_bytes\x18\x01 \x01(\x05R\x0fmaxMessageBytes\x12#\n" +
+	"\rrequired_acks\x18\x02 \x01(\x05R\frequiredAcks\x12 \n" +
+	"\vcompression\x18\x03 \x01(\tR\vcompression\x12\x1b\n" +
+	"\tretry_max\x18\x04 \x01(\x05R\bretryMax\x12>\n" +
+	"\rretry_backoff\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\fretryBackoff\x123\n" +
+	"\atimeout\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x1a\xf2\x02\n" +
+	"\bConsumer\x12B\n" +
+	"\x0fsession_timeout\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\x0esessionTimeout\x12H\n" +
+	"\x12heartbeat_interval\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\x11heartbeatInterval\x12I\n" +
+	"\x13max_processing_time\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\x11maxProcessingTime\x12&\n" +
+	"\x0ffetch_min_bytes\x18\x04 \x01(\x05R\rfetchMinBytes\x12&\n" +
+	"\x0ffetch_max_bytes\x18\x05 \x01(\x05R\rfetchMaxBytes\x12=\n" +
+	"\rmax_wait_time\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\vmaxWaitTime\x1a\x9a\x01\n" +
+	"\x06Topics\x12#\n" +
+	"\rseckill_order\x18\x01 \x01(\tR\fseckillOrder\x12%\n" +
+	"\x0eseckill_result\x18\x02 \x01(\tR\rseckillResult\x12\x1f\n" +
+	"\vseckill_dlq\x18\x03 \x01(\tR\n" +
+	"seckillDlq\x12#\n" +
+	"\rseckill_retry\x18\x04 \x01(\tR\fseckillRetryB$Z\"seckill-service/internal/conf;confb\x06proto3"
 
 var (
 	file_conf_conf_proto_rawDescOnce sync.Once
@@ -499,36 +867,50 @@ func file_conf_conf_proto_rawDescGZIP() []byte {
 	return file_conf_conf_proto_rawDescData
 }
 
-var file_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_conf_conf_proto_goTypes = []any{
 	(*Bootstrap)(nil),           // 0: kratos.api.Bootstrap
 	(*Server)(nil),              // 1: kratos.api.Server
 	(*Data)(nil),                // 2: kratos.api.Data
-	(*Server_HTTP)(nil),         // 3: kratos.api.Server.HTTP
-	(*Server_GRPC)(nil),         // 4: kratos.api.Server.GRPC
-	(*Data_Database)(nil),       // 5: kratos.api.Data.Database
-	(*Data_Redis)(nil),          // 6: kratos.api.Data.Redis
-	(*durationpb.Duration)(nil), // 7: google.protobuf.Duration
+	(*Kafka)(nil),               // 3: kratos.api.Kafka
+	(*Server_HTTP)(nil),         // 4: kratos.api.Server.HTTP
+	(*Server_GRPC)(nil),         // 5: kratos.api.Server.GRPC
+	(*Data_Database)(nil),       // 6: kratos.api.Data.Database
+	(*Data_Redis)(nil),          // 7: kratos.api.Data.Redis
+	(*Kafka_Producer)(nil),      // 8: kratos.api.Kafka.Producer
+	(*Kafka_Consumer)(nil),      // 9: kratos.api.Kafka.Consumer
+	(*Kafka_Topics)(nil),        // 10: kratos.api.Kafka.Topics
+	(*durationpb.Duration)(nil), // 11: google.protobuf.Duration
 }
 var file_conf_conf_proto_depIdxs = []int32{
 	1,  // 0: kratos.api.Bootstrap.server:type_name -> kratos.api.Server
 	2,  // 1: kratos.api.Bootstrap.data:type_name -> kratos.api.Data
-	3,  // 2: kratos.api.Server.http:type_name -> kratos.api.Server.HTTP
-	4,  // 3: kratos.api.Server.grpc:type_name -> kratos.api.Server.GRPC
-	5,  // 4: kratos.api.Data.user_db:type_name -> kratos.api.Data.Database
-	5,  // 5: kratos.api.Data.product_db:type_name -> kratos.api.Data.Database
-	5,  // 6: kratos.api.Data.core_db:type_name -> kratos.api.Data.Database
-	5,  // 7: kratos.api.Data.pay_db:type_name -> kratos.api.Data.Database
-	6,  // 8: kratos.api.Data.redis:type_name -> kratos.api.Data.Redis
-	7,  // 9: kratos.api.Server.HTTP.timeout:type_name -> google.protobuf.Duration
-	7,  // 10: kratos.api.Server.GRPC.timeout:type_name -> google.protobuf.Duration
-	7,  // 11: kratos.api.Data.Redis.read_timeout:type_name -> google.protobuf.Duration
-	7,  // 12: kratos.api.Data.Redis.write_timeout:type_name -> google.protobuf.Duration
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	3,  // 2: kratos.api.Bootstrap.kafka:type_name -> kratos.api.Kafka
+	4,  // 3: kratos.api.Server.http:type_name -> kratos.api.Server.HTTP
+	5,  // 4: kratos.api.Server.grpc:type_name -> kratos.api.Server.GRPC
+	6,  // 5: kratos.api.Data.user_db:type_name -> kratos.api.Data.Database
+	6,  // 6: kratos.api.Data.product_db:type_name -> kratos.api.Data.Database
+	6,  // 7: kratos.api.Data.core_db:type_name -> kratos.api.Data.Database
+	6,  // 8: kratos.api.Data.pay_db:type_name -> kratos.api.Data.Database
+	7,  // 9: kratos.api.Data.redis:type_name -> kratos.api.Data.Redis
+	8,  // 10: kratos.api.Kafka.producer:type_name -> kratos.api.Kafka.Producer
+	9,  // 11: kratos.api.Kafka.consumer:type_name -> kratos.api.Kafka.Consumer
+	10, // 12: kratos.api.Kafka.topics:type_name -> kratos.api.Kafka.Topics
+	11, // 13: kratos.api.Server.HTTP.timeout:type_name -> google.protobuf.Duration
+	11, // 14: kratos.api.Server.GRPC.timeout:type_name -> google.protobuf.Duration
+	11, // 15: kratos.api.Data.Redis.read_timeout:type_name -> google.protobuf.Duration
+	11, // 16: kratos.api.Data.Redis.write_timeout:type_name -> google.protobuf.Duration
+	11, // 17: kratos.api.Kafka.Producer.retry_backoff:type_name -> google.protobuf.Duration
+	11, // 18: kratos.api.Kafka.Producer.timeout:type_name -> google.protobuf.Duration
+	11, // 19: kratos.api.Kafka.Consumer.session_timeout:type_name -> google.protobuf.Duration
+	11, // 20: kratos.api.Kafka.Consumer.heartbeat_interval:type_name -> google.protobuf.Duration
+	11, // 21: kratos.api.Kafka.Consumer.max_processing_time:type_name -> google.protobuf.Duration
+	11, // 22: kratos.api.Kafka.Consumer.max_wait_time:type_name -> google.protobuf.Duration
+	23, // [23:23] is the sub-list for method output_type
+	23, // [23:23] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_conf_conf_proto_init() }
@@ -542,7 +924,7 @@ func file_conf_conf_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conf_conf_proto_rawDesc), len(file_conf_conf_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -136,7 +136,9 @@ CREATE TABLE `seckill_order` (
                                  `seckill_price` bigint(20) unsigned NOT NULL COMMENT '秒杀单价（快照，单位：分）',
                                  `quantity` int(11) unsigned NOT NULL DEFAULT '1' COMMENT '购买数量',
                                  `order_amount` bigint(20) unsigned NOT NULL COMMENT '订单总金额（单位：分）',
+                                 `final_amount` bigint(20) unsigned NOT NULL DEFAULT 0 COMMENT '实际支付金额（单位：分）',
                                  `coupon_id` bigint(20) unsigned DEFAULT NULL COMMENT '使用的优惠券ID',
+                                 `couple_discount` bigint(20) unsigned DEFAULT NOT NULL DEFAULT 0 COMMENT '优惠金额（单位：分）',
                                  `address_id` bigint(20) unsigned DEFAULT NULL COMMENT '收货地址ID',
                                  `status` tinyint(4) unsigned NOT NULL DEFAULT '0' COMMENT '状态：0-待支付，1-已支付，2-已取消，3-已退款',
                                  `pay_time` datetime DEFAULT NULL COMMENT '支付时间',
@@ -149,6 +151,12 @@ CREATE TABLE `seckill_order` (
                                  KEY `idx_activity_id` (`activity_id`),
                                  KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='秒杀订单表';
+
+use seckill_core;
+ALTER TABLE seckill_order
+    ADD COLUMN coupon_discount bigint unsigned NOT NULL DEFAULT 0 COMMENT '优惠券抵扣金额' AFTER order_amount,
+    ADD COLUMN final_amount bigint unsigned NOT NULL DEFAULT 0 COMMENT '实付金额' AFTER coupon_discount;
+
 
 -- 订单收货信息快照表
 CREATE TABLE `order_shipping` (

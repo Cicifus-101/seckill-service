@@ -110,12 +110,13 @@ func main() {
 		g := gen.NewGenerator(gen.Config{
 			OutPath:      dbc.OutPath,
 			ModelPkgPath: dbc.ModelPkg,
-			Mode:         gen.WithDefaultQuery | gen.WithQueryInterface,
+			// 生成默认的查询实例（全局Query）和查询接口（方便mock）
+			Mode: gen.WithDefaultQuery | gen.WithQueryInterface,
 
 			// 字段配置
-			FieldNullable:     true, // 字段允许为空
+			FieldNullable:     true, // 允许为空的字段，生成指针类型
 			FieldCoverable:    true, // 字段可覆盖
-			FieldSignable:     true, // 字段可签名
+			FieldSignable:     true, // 支持有无符号
 			FieldWithIndexTag: true, // 生成索引标签
 			FieldWithTypeTag:  true, // 生成类型标签
 		})
@@ -127,10 +128,10 @@ func main() {
 		// 生成指定表
 		models := make([]interface{}, len(dbc.Tables))
 		for i, table := range dbc.Tables {
-			models[i] = g.GenerateModel(table)
+			models[i] = g.GenerateModel(table) // 同时生成表和gorm映射结构体
 		}
 
-		g.ApplyBasic(models...)
+		g.ApplyBasic(models...) //将生成注册到生成器，生成查询语句
 
 		// 执行生成
 		g.Execute()

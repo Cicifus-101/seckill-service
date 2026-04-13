@@ -73,5 +73,5 @@ type SeckillResult struct {
 	Status      int32 // 0-处理中 1-成功 2-失败
 	OrderNo     string
 	Message     string
-	OrderAmount uint64
+	OrderAmount uint64 // 订单金额
 }

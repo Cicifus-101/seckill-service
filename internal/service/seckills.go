@@ -71,7 +71,7 @@ func (s *SeckillService) SeckillProducts(ctx context.Context, req *v1.SeckillPro
 // SeckillProductDetail 查询秒杀商品详情
 func (s *SeckillService) SeckillProductDetail(ctx context.Context, req *v1.SeckillProductDetailRequest) (*v1.SeckillProductDetailResponse, error) {
 	s.log.WithContext(ctx).Infof("SeckillProductDetail req: %+v", req)
-	res, err := s.uc.GetSeckillProductDetail(ctx, uint64(req.UserId), uint64(req.ActivityId), uint64(req.ProductId))
+	res, err := s.uc.GetSeckillProductDetail(ctx, uint64(req.UserId), uint64(req.ProductId), uint64(req.ActivityId))
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "商品不存在: %v", err)
 	}

@@ -50,7 +50,7 @@ func NewConsumer(cfg *Config, mysql biz.SeckillRepo, cache biz.CacheRepo,
 	}
 
 	saramaCfg := cfg.NewSaramaConfig()
-	saramaCfg.Consumer.Offsets.Initial = sarama.OffsetNewest
+	saramaCfg.Consumer.Offsets.Initial = sarama.OffsetNewest //从最新开始消费
 
 	consumerGroup, err := sarama.NewConsumerGroup(cfg.Brokers, cfg.ConsumerGroup, saramaCfg)
 	if err != nil {
@@ -74,6 +74,7 @@ func NewConsumer(cfg *Config, mysql biz.SeckillRepo, cache biz.CacheRepo,
 
 // Start 启动消费者
 func (c *Consumer) Start(ctx context.Context) error {
+	// 这个实现了消息处理器handler的接口
 	handler := &ConsumerHandler{
 		consumer: c,
 		ready:    make(chan bool),
@@ -125,8 +126,9 @@ func (h *ConsumerHandler) Cleanup(session sarama.ConsumerGroupSession) error {
 	return nil
 }
 
-// ConsumeClaim 实现 sarama.ConsumerGroupHandler
+// ConsumeClaim 实现 sarama.ConsumerGroupHandler 消息拉取
 func (h *ConsumerHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
+	// 从一个分区中不断读取消息，session是消费
 	for msg := range claim.Messages() {
 		h.consumer.processMessage(session.Context(), msg, session)
 	}

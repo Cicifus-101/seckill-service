@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"fmt"
+	"github.com/google/wire"
 	"time"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -17,6 +18,8 @@ import (
 	productQuery "seckill-service/internal/data/product/query"
 	userQuery "seckill-service/internal/data/user/query"
 )
+
+var ProviderSet = wire.NewSet(NewData)
 
 // Data .
 type Data struct {

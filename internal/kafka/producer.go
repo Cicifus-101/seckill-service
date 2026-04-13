@@ -133,6 +133,9 @@ func (p *Producer) SendAsync(ctx context.Context, msg *mq.SeckillOrderMessage) {
 		Value: sarama.ByteEncoder(data),
 		Headers: []sarama.RecordHeader{
 			{Key: []byte("retry_count"), Value: []byte("0")},
+			{Key: []byte("order_no"), Value: []byte(msg.OrderNo)},
+			{Key: []byte("user_id"), Value: []byte(fmt.Sprintf("%d", msg.UserID))},
+			{Key: []byte("timestamp"), Value: []byte(fmt.Sprintf("%d", msg.Timestamp))},
 		},
 	}
 
@@ -151,7 +154,6 @@ func (p *Producer) SendToDLQ(ctx context.Context, msg *mq.SeckillOrderMessage, r
 		RetryCount:  retryCount,
 		LastError:   reason,
 		NextRetryAt: time.Now().Unix(),
-		DeadTime:    time.Now().Unix(),
 	}
 
 	data, err := json.Marshal(dlqMsg)

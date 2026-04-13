@@ -5,6 +5,7 @@ server:
   grpc:
     addr: 0.0.0.0:9000
     timeout: 1s
+
 data:
   user_db:
     driver: mysql
@@ -22,9 +23,41 @@ data:
     addr: 127.0.0.1:6379
     read_timeout: 0.2s
     write_timeout: 0.2s
+
 redis:
   addr: 127.0.0.1:3306
   password: admin123
   db: 0
   read_timeout: 0.2s
   write_timeout: 0.2s
+
+kafka:
+  brokers:
+    - "localhost:9092"
+    - "localhost:9093"
+    - "localhost:9094"
+  version: "2.6.0"
+  consumer_group: "seckill-order-group"
+  client_id: "seckill-service"
+
+  producer:
+    max_message_bytes: 1048576  # 1MB
+    required_acks: -1           # -1: all, 0: none, 1: leader
+    compression: "snappy"
+    retry_max: 3
+    retry_backoff: 0.1s
+    timeout: 5s
+
+  consumer:
+    session_timeout: 30s
+    heartbeat_interval: 3s
+    max_processing_time: 60s
+    fetch_min_bytes: 1
+    fetch_max_bytes: 1048576
+    max_wait_time: 0.5s
+
+  topics:
+    seckill_order: "seckill.order"
+    seckill_result: "seckill.result"
+    seckill_dlq: "seckill.order.dlq"
+    seckill_retry: "seckill.order.retry"
