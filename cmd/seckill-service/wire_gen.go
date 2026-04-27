@@ -42,13 +42,15 @@ func wireApp(s *conf.Server, d *conf.Data, k *conf.Kafka, logger log.Logger) (*k
 	}
 	rateLimiter := cache.NewRateLimiter(client)
 	idempotentChecker := cache.NewIdempotentChecker(client)
-	delayQueue := job.NewDelayQueue(client, seckillRepo, cacheRepo, logger)
 	transaction := data.NewTransaction(dataData, logger)
-	seckillUsecase := biz.NewSeckillUsecase(seckillRepo, cacheRepo, producer, rateLimiter, idempotentChecker, delayQueue, logger, transaction)
+	orderCancelService := biz.NewOrderCancelService(seckillRepo, cacheRepo, transaction, logger)
+	delayQueue := job.NewDelayQueue(client, seckillRepo, cacheRepo, orderCancelService, logger)
+	idGenerator := biz.NewIDGenerator(logger)
+	seckillUsecase := biz.NewSeckillUsecase(seckillRepo, cacheRepo, producer, rateLimiter, idempotentChecker, delayQueue, orderCancelService, idGenerator, logger, transaction)
 	seckillService := service.NewSeckillService(seckillUsecase, logger)
 	grpcServer := server.NewGRPCServer(s, seckillService, logger)
 	httpServer := server.NewHTTPServer(s, seckillService, logger)
-	consumer, err := kafka.NewConsumer(config, seckillRepo, cacheRepo, idempotentChecker, producer, logger)
+	consumer, err := kafka.NewConsumer(config, seckillUsecase, producer, logger)
 	if err != nil {
 		return nil, nil, err
 	}
