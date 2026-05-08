@@ -48,7 +48,7 @@ else
 	if tokens == nil or last == nil then
 		tokens = capacity
 		last   = now
-	else
+	else  
 		local elapsed = (now - last) / 1000000.0
 		if elapsed < 0 then elapsed = 0 end
 		tokens = tokens + elapsed * rate

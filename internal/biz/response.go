@@ -75,3 +75,17 @@ type SeckillResult struct {
 	Message     string
 	OrderAmount uint64 // 订单金额
 }
+
+type PayCallbackRequest struct {
+	OrderNo        string
+	PlatformNumber string
+	PayAmount      uint64
+	PlatformStatus string
+	PayTime        int64
+	Sign           string
+}
+
+type PayCallbackResult struct {
+	Success bool
+	Message string
+}

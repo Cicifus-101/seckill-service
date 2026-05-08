@@ -21,21 +21,15 @@ data:
     source: root:1256@tcp(127.0.0.1:3306)/seckill_pay?charset=utf8mb4&parseTime=True&loc=Local
   redis:
     addr: 127.0.0.1:6379
+    password: admin123
+    db: 0
     read_timeout: 0.2s
     write_timeout: 0.2s
 
-redis:
-  addr: 127.0.0.1:3306
-  password: admin123
-  db: 0
-  read_timeout: 0.2s
-  write_timeout: 0.2s
 
 kafka:
   brokers:
     - "localhost:9092"
-    - "localhost:9093"
-    - "localhost:9094"
   version: "2.6.0"
   consumer_group: "seckill-order-group"
   client_id: "seckill-service"
@@ -47,6 +41,8 @@ kafka:
     retry_max: 3
     retry_backoff: 0.1s
     timeout: 5s
+    enable_idempotence: true
+    max_in_flight: 1
 
   consumer:
     session_timeout: 30s
@@ -61,3 +57,23 @@ kafka:
     seckill_result: "seckill.result"
     seckill_dlq: "seckill.order.dlq"
     seckill_retry: "seckill.order.retry"
+    seckill_order_paid: "seckill.order.paid"
+
+observability:
+  enabled: true
+  service_name: "seckill-service"
+  env: "dev"
+  otel_endpoint: "127.0.0.1:4317"
+  sample_ratio: 1.0
+  enable_metrics: true
+  metrics_addr: "0.0.0.0:2112"
+
+nacos:
+  enabled: false
+  addr: "127.0.0.1:8848"
+  namespace: "public"
+  group: "DEFAULT_GROUP"
+  data_id: "seckill-service.yaml"
+  username: ""
+  password: ""
+  service_name: "seckill-service"

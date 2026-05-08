@@ -1,0 +1,11 @@
+﻿{
+  "userId": 1,
+  "skuId": 1001,
+  "activityId": 1,
+  "productId": 1,
+  "quantity": 1,
+  "couponId": 0,
+  "addressId": 1,
+  "clientIp": "127.0.0.1",
+  "requestId": "req-001"
+}

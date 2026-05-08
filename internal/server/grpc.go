@@ -3,6 +3,7 @@ package server
 import (
 	v1 "seckill-service/api/seckill/v1"
 	"seckill-service/internal/conf"
+	"seckill-service/internal/observability"
 	"seckill-service/internal/service"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -15,6 +16,8 @@ func NewGRPCServer(c *conf.Server, seckill *service.SeckillService, logger log.L
 	var opts = []grpc.ServerOption{
 		grpc.Middleware(
 			recovery.Recovery(),
+			observability.TraceMiddleware("grpc"),
+			observability.MetricsMiddleware("grpc"),
 		),
 	}
 	if c.Grpc.Network != "" {

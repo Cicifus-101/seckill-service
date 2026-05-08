@@ -5,6 +5,7 @@ import "time"
 // SeckillProduct 秒杀商品列表项
 type SeckillProduct struct {
 	SkuID          uint64
+	ActivityID     uint64
 	ProductID      uint64
 	Name           string
 	MainImage      string
@@ -102,6 +103,7 @@ type Coupon struct {
 type Order struct {
 	OrderNo        string
 	UserID         uint64
+	RequestID      string
 	ActivityID     uint64
 	ProductID      uint64
 	SkuID          uint64
@@ -151,3 +153,36 @@ type PayInfo struct {
 	PayAmount      uint64
 	PayTime        *time.Time
 }
+
+type PendingReservation struct {
+	OrderNo    string `json:"order_no"`
+	RequestID  string `json:"request_id"`
+	UserID     uint64 `json:"user_id"`
+	ActivityID uint64 `json:"activity_id"`
+	SkuID      uint64 `json:"sku_id"`
+	Quantity   int    `json:"quantity"`
+	CreatedAt  int64  `json:"created_at"`
+}
+
+type DeadLetterMessage struct {
+	ID           uint64
+	EventID      string
+	Topic        string
+	Partition    int32
+	Offset       int64
+	OrderNo      string
+	RequestID    string
+	TraceID      string
+	RetryCount   int
+	ErrorMessage string
+	RawPayload   string
+	Status       string
+	CreateTime   time.Time
+	UpdateTime   time.Time
+}
+
+const (
+	DeadLetterStatusPending  = "PENDING"
+	DeadLetterStatusReplayed = "REPLAYED"
+	DeadLetterStatusFailed   = "FAILED"
+)

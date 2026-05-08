@@ -7,6 +7,7 @@ package query
 import (
 	"context"
 	"database/sql"
+	"seckill-service/cmd/gen/data/core/model"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -16,8 +17,6 @@ import (
 	"gorm.io/gen/field"
 
 	"gorm.io/plugin/dbresolver"
-
-	"seckill-service/cmd/gen/internal/data/core/model"
 )
 
 func newSeckillSku(db *gorm.DB, opts ...gen.DOOption) seckillSku {

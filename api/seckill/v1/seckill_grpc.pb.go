@@ -26,6 +26,8 @@ const (
 	Seckill_GetSeckillOrder_FullMethodName      = "/api.seckill.v1.Seckill/GetSeckillOrder"
 	Seckill_GetSeckillResult_FullMethodName     = "/api.seckill.v1.Seckill/GetSeckillResult"
 	Seckill_PaySeckillOrder_FullMethodName      = "/api.seckill.v1.Seckill/PaySeckillOrder"
+	Seckill_PayCallback_FullMethodName          = "/api.seckill.v1.Seckill/PayCallback"
+	Seckill_ReplayDeadLetter_FullMethodName     = "/api.seckill.v1.Seckill/ReplayDeadLetter"
 )
 
 // SeckillClient is the client API for Seckill service.
@@ -46,6 +48,9 @@ type SeckillClient interface {
 	GetSeckillResult(ctx context.Context, in *GetSeckillResultRequest, opts ...grpc.CallOption) (*GetSeckillResultResponse, error)
 	// 支付秒杀订单
 	PaySeckillOrder(ctx context.Context, in *PaySeckillOrderRequest, opts ...grpc.CallOption) (*PaySeckillOrderResponse, error)
+	// 支付回调
+	PayCallback(ctx context.Context, in *PayCallbackRequest, opts ...grpc.CallOption) (*PayCallbackReply, error)
+	ReplayDeadLetter(ctx context.Context, in *ReplayDeadLetterRequest, opts ...grpc.CallOption) (*ReplayDeadLetterReply, error)
 }
 
 type seckillClient struct {
@@ -126,6 +131,26 @@ func (c *seckillClient) PaySeckillOrder(ctx context.Context, in *PaySeckillOrder
 	return out, nil
 }
 
+func (c *seckillClient) PayCallback(ctx context.Context, in *PayCallbackRequest, opts ...grpc.CallOption) (*PayCallbackReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PayCallbackReply)
+	err := c.cc.Invoke(ctx, Seckill_PayCallback_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *seckillClient) ReplayDeadLetter(ctx context.Context, in *ReplayDeadLetterRequest, opts ...grpc.CallOption) (*ReplayDeadLetterReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReplayDeadLetterReply)
+	err := c.cc.Invoke(ctx, Seckill_ReplayDeadLetter_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SeckillServer is the server API for Seckill service.
 // All implementations must embed UnimplementedSeckillServer
 // for forward compatibility.
@@ -144,6 +169,9 @@ type SeckillServer interface {
 	GetSeckillResult(context.Context, *GetSeckillResultRequest) (*GetSeckillResultResponse, error)
 	// 支付秒杀订单
 	PaySeckillOrder(context.Context, *PaySeckillOrderRequest) (*PaySeckillOrderResponse, error)
+	// 支付回调
+	PayCallback(context.Context, *PayCallbackRequest) (*PayCallbackReply, error)
+	ReplayDeadLetter(context.Context, *ReplayDeadLetterRequest) (*ReplayDeadLetterReply, error)
 	mustEmbedUnimplementedSeckillServer()
 }
 
@@ -174,6 +202,12 @@ func (UnimplementedSeckillServer) GetSeckillResult(context.Context, *GetSeckillR
 }
 func (UnimplementedSeckillServer) PaySeckillOrder(context.Context, *PaySeckillOrderRequest) (*PaySeckillOrderResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PaySeckillOrder not implemented")
+}
+func (UnimplementedSeckillServer) PayCallback(context.Context, *PayCallbackRequest) (*PayCallbackReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method PayCallback not implemented")
+}
+func (UnimplementedSeckillServer) ReplayDeadLetter(context.Context, *ReplayDeadLetterRequest) (*ReplayDeadLetterReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReplayDeadLetter not implemented")
 }
 func (UnimplementedSeckillServer) mustEmbedUnimplementedSeckillServer() {}
 func (UnimplementedSeckillServer) testEmbeddedByValue()                 {}
@@ -322,6 +356,42 @@ func _Seckill_PaySeckillOrder_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Seckill_PayCallback_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PayCallbackRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SeckillServer).PayCallback(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Seckill_PayCallback_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SeckillServer).PayCallback(ctx, req.(*PayCallbackRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Seckill_ReplayDeadLetter_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReplayDeadLetterRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SeckillServer).ReplayDeadLetter(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Seckill_ReplayDeadLetter_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SeckillServer).ReplayDeadLetter(ctx, req.(*ReplayDeadLetterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Seckill_ServiceDesc is the grpc.ServiceDesc for Seckill service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -356,6 +426,14 @@ var Seckill_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PaySeckillOrder",
 			Handler:    _Seckill_PaySeckillOrder_Handler,
+		},
+		{
+			MethodName: "PayCallback",
+			Handler:    _Seckill_PayCallback_Handler,
+		},
+		{
+			MethodName: "ReplayDeadLetter",
+			Handler:    _Seckill_ReplayDeadLetter_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

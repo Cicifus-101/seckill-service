@@ -1820,6 +1820,238 @@ func (x *PaySeckillOrderResponse) GetPlatformNumber() string {
 	return ""
 }
 
+type PayCallbackRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	OrderNo        string                 `protobuf:"bytes,1,opt,name=order_no,json=orderNo,proto3" json:"order_no,omitempty"`
+	PlatformNumber string                 `protobuf:"bytes,2,opt,name=platform_number,json=platformNumber,proto3" json:"platform_number,omitempty"`
+	PayAmount      int64                  `protobuf:"varint,3,opt,name=pay_amount,json=payAmount,proto3" json:"pay_amount,omitempty"`
+	PlatformStatus string                 `protobuf:"bytes,4,opt,name=platform_status,json=platformStatus,proto3" json:"platform_status,omitempty"`
+	PayTime        int64                  `protobuf:"varint,5,opt,name=pay_time,json=payTime,proto3" json:"pay_time,omitempty"`
+	Sign           string                 `protobuf:"bytes,6,opt,name=sign,proto3" json:"sign,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *PayCallbackRequest) Reset() {
+	*x = PayCallbackRequest{}
+	mi := &file_seckill_v1_seckill_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PayCallbackRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PayCallbackRequest) ProtoMessage() {}
+
+func (x *PayCallbackRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_seckill_v1_seckill_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PayCallbackRequest.ProtoReflect.Descriptor instead.
+func (*PayCallbackRequest) Descriptor() ([]byte, []int) {
+	return file_seckill_v1_seckill_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *PayCallbackRequest) GetOrderNo() string {
+	if x != nil {
+		return x.OrderNo
+	}
+	return ""
+}
+
+func (x *PayCallbackRequest) GetPlatformNumber() string {
+	if x != nil {
+		return x.PlatformNumber
+	}
+	return ""
+}
+
+func (x *PayCallbackRequest) GetPayAmount() int64 {
+	if x != nil {
+		return x.PayAmount
+	}
+	return 0
+}
+
+func (x *PayCallbackRequest) GetPlatformStatus() string {
+	if x != nil {
+		return x.PlatformStatus
+	}
+	return ""
+}
+
+func (x *PayCallbackRequest) GetPayTime() int64 {
+	if x != nil {
+		return x.PayTime
+	}
+	return 0
+}
+
+func (x *PayCallbackRequest) GetSign() string {
+	if x != nil {
+		return x.Sign
+	}
+	return ""
+}
+
+type PayCallbackReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PayCallbackReply) Reset() {
+	*x = PayCallbackReply{}
+	mi := &file_seckill_v1_seckill_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PayCallbackReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PayCallbackReply) ProtoMessage() {}
+
+func (x *PayCallbackReply) ProtoReflect() protoreflect.Message {
+	mi := &file_seckill_v1_seckill_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PayCallbackReply.ProtoReflect.Descriptor instead.
+func (*PayCallbackReply) Descriptor() ([]byte, []int) {
+	return file_seckill_v1_seckill_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *PayCallbackReply) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *PayCallbackReply) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+type ReplayDeadLetterRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	EventId       string                 `protobuf:"bytes,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReplayDeadLetterRequest) Reset() {
+	*x = ReplayDeadLetterRequest{}
+	mi := &file_seckill_v1_seckill_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReplayDeadLetterRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReplayDeadLetterRequest) ProtoMessage() {}
+
+func (x *ReplayDeadLetterRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_seckill_v1_seckill_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReplayDeadLetterRequest.ProtoReflect.Descriptor instead.
+func (*ReplayDeadLetterRequest) Descriptor() ([]byte, []int) {
+	return file_seckill_v1_seckill_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *ReplayDeadLetterRequest) GetEventId() string {
+	if x != nil {
+		return x.EventId
+	}
+	return ""
+}
+
+type ReplayDeadLetterReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReplayDeadLetterReply) Reset() {
+	*x = ReplayDeadLetterReply{}
+	mi := &file_seckill_v1_seckill_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReplayDeadLetterReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReplayDeadLetterReply) ProtoMessage() {}
+
+func (x *ReplayDeadLetterReply) ProtoReflect() protoreflect.Message {
+	mi := &file_seckill_v1_seckill_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReplayDeadLetterReply.ProtoReflect.Descriptor instead.
+func (*ReplayDeadLetterReply) Descriptor() ([]byte, []int) {
+	return file_seckill_v1_seckill_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *ReplayDeadLetterReply) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ReplayDeadLetterReply) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 var File_seckill_v1_seckill_proto protoreflect.FileDescriptor
 
 const file_seckill_v1_seckill_proto_rawDesc = "" +
@@ -2003,7 +2235,23 @@ const file_seckill_v1_seckill_proto_rawDesc = "" +
 	"\apay_url\x18\x03 \x01(\tR\x06payUrl\x12\x1d\n" +
 	"\n" +
 	"pay_amount\x18\x04 \x01(\x03R\tpayAmount\x12'\n" +
-	"\x0fplatform_number\x18\x05 \x01(\tR\x0eplatformNumber2\xf7\x05\n" +
+	"\x0fplatform_number\x18\x05 \x01(\tR\x0eplatformNumber\"\xcf\x01\n" +
+	"\x12PayCallbackRequest\x12\x19\n" +
+	"\border_no\x18\x01 \x01(\tR\aorderNo\x12'\n" +
+	"\x0fplatform_number\x18\x02 \x01(\tR\x0eplatformNumber\x12\x1d\n" +
+	"\n" +
+	"pay_amount\x18\x03 \x01(\x03R\tpayAmount\x12'\n" +
+	"\x0fplatform_status\x18\x04 \x01(\tR\x0eplatformStatus\x12\x19\n" +
+	"\bpay_time\x18\x05 \x01(\x03R\apayTime\x12\x12\n" +
+	"\x04sign\x18\x06 \x01(\tR\x04sign\"F\n" +
+	"\x10PayCallbackReply\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"4\n" +
+	"\x17ReplayDeadLetterRequest\x12\x19\n" +
+	"\bevent_id\x18\x01 \x01(\tR\aeventId\"K\n" +
+	"\x15ReplayDeadLetterReply\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage2\xb4\a\n" +
 	"\aSeckill\x12d\n" +
 	"\x0fSeckillProducts\x12&.api.seckill.v1.SeckillProductsRequest\x1a'.api.seckill.v1.SeckillProductsResponse\"\x00\x12s\n" +
 	"\x14SeckillProductDetail\x12+.api.seckill.v1.SeckillProductDetailRequest\x1a,.api.seckill.v1.SeckillProductDetailResponse\"\x00\x12m\n" +
@@ -2011,7 +2259,9 @@ const file_seckill_v1_seckill_proto_rawDesc = "" +
 	"\x12CreateSeckillOrder\x12).api.seckill.v1.CreateSeckillOrderRequest\x1a*.api.seckill.v1.CreateSeckillOrderResponse\"\x00\x12d\n" +
 	"\x0fGetSeckillOrder\x12&.api.seckill.v1.GetSeckillOrderRequest\x1a'.api.seckill.v1.GetSeckillOrderResponse\"\x00\x12g\n" +
 	"\x10GetSeckillResult\x12'.api.seckill.v1.GetSeckillResultRequest\x1a(.api.seckill.v1.GetSeckillResultResponse\"\x00\x12d\n" +
-	"\x0fPaySeckillOrder\x12&.api.seckill.v1.PaySeckillOrderRequest\x1a'.api.seckill.v1.PaySeckillOrderResponse\"\x00B5\n" +
+	"\x0fPaySeckillOrder\x12&.api.seckill.v1.PaySeckillOrderRequest\x1a'.api.seckill.v1.PaySeckillOrderResponse\"\x00\x12U\n" +
+	"\vPayCallback\x12\".api.seckill.v1.PayCallbackRequest\x1a .api.seckill.v1.PayCallbackReply\"\x00\x12d\n" +
+	"\x10ReplayDeadLetter\x12'.api.seckill.v1.ReplayDeadLetterRequest\x1a%.api.seckill.v1.ReplayDeadLetterReply\"\x00B5\n" +
 	"\x0eapi.seckill.v1P\x01Z!seckill-service/api/seckill/v1;v1b\x06proto3"
 
 var (
@@ -2026,7 +2276,7 @@ func file_seckill_v1_seckill_proto_rawDescGZIP() []byte {
 	return file_seckill_v1_seckill_proto_rawDescData
 }
 
-var file_seckill_v1_seckill_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_seckill_v1_seckill_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_seckill_v1_seckill_proto_goTypes = []any{
 	(*SeckillProductsRequest)(nil),       // 0: api.seckill.v1.SeckillProductsRequest
 	(*SeckillProductsResponse)(nil),      // 1: api.seckill.v1.SeckillProductsResponse
@@ -2049,6 +2299,10 @@ var file_seckill_v1_seckill_proto_goTypes = []any{
 	(*GetSeckillResultResponse)(nil),     // 18: api.seckill.v1.GetSeckillResultResponse
 	(*PaySeckillOrderRequest)(nil),       // 19: api.seckill.v1.PaySeckillOrderRequest
 	(*PaySeckillOrderResponse)(nil),      // 20: api.seckill.v1.PaySeckillOrderResponse
+	(*PayCallbackRequest)(nil),           // 21: api.seckill.v1.PayCallbackRequest
+	(*PayCallbackReply)(nil),             // 22: api.seckill.v1.PayCallbackReply
+	(*ReplayDeadLetterRequest)(nil),      // 23: api.seckill.v1.ReplayDeadLetterRequest
+	(*ReplayDeadLetterReply)(nil),        // 24: api.seckill.v1.ReplayDeadLetterReply
 }
 var file_seckill_v1_seckill_proto_depIdxs = []int32{
 	2,  // 0: api.seckill.v1.SeckillProductsResponse.products:type_name -> api.seckill.v1.ProductInfo
@@ -2066,15 +2320,19 @@ var file_seckill_v1_seckill_proto_depIdxs = []int32{
 	13, // 12: api.seckill.v1.Seckill.GetSeckillOrder:input_type -> api.seckill.v1.GetSeckillOrderRequest
 	17, // 13: api.seckill.v1.Seckill.GetSeckillResult:input_type -> api.seckill.v1.GetSeckillResultRequest
 	19, // 14: api.seckill.v1.Seckill.PaySeckillOrder:input_type -> api.seckill.v1.PaySeckillOrderRequest
-	1,  // 15: api.seckill.v1.Seckill.SeckillProducts:output_type -> api.seckill.v1.SeckillProductsResponse
-	4,  // 16: api.seckill.v1.Seckill.SeckillProductDetail:output_type -> api.seckill.v1.SeckillProductDetailResponse
-	9,  // 17: api.seckill.v1.Seckill.GetCurrentActivity:output_type -> api.seckill.v1.GetCurrentActivityResponse
-	12, // 18: api.seckill.v1.Seckill.CreateSeckillOrder:output_type -> api.seckill.v1.CreateSeckillOrderResponse
-	14, // 19: api.seckill.v1.Seckill.GetSeckillOrder:output_type -> api.seckill.v1.GetSeckillOrderResponse
-	18, // 20: api.seckill.v1.Seckill.GetSeckillResult:output_type -> api.seckill.v1.GetSeckillResultResponse
-	20, // 21: api.seckill.v1.Seckill.PaySeckillOrder:output_type -> api.seckill.v1.PaySeckillOrderResponse
-	15, // [15:22] is the sub-list for method output_type
-	8,  // [8:15] is the sub-list for method input_type
+	21, // 15: api.seckill.v1.Seckill.PayCallback:input_type -> api.seckill.v1.PayCallbackRequest
+	23, // 16: api.seckill.v1.Seckill.ReplayDeadLetter:input_type -> api.seckill.v1.ReplayDeadLetterRequest
+	1,  // 17: api.seckill.v1.Seckill.SeckillProducts:output_type -> api.seckill.v1.SeckillProductsResponse
+	4,  // 18: api.seckill.v1.Seckill.SeckillProductDetail:output_type -> api.seckill.v1.SeckillProductDetailResponse
+	9,  // 19: api.seckill.v1.Seckill.GetCurrentActivity:output_type -> api.seckill.v1.GetCurrentActivityResponse
+	12, // 20: api.seckill.v1.Seckill.CreateSeckillOrder:output_type -> api.seckill.v1.CreateSeckillOrderResponse
+	14, // 21: api.seckill.v1.Seckill.GetSeckillOrder:output_type -> api.seckill.v1.GetSeckillOrderResponse
+	18, // 22: api.seckill.v1.Seckill.GetSeckillResult:output_type -> api.seckill.v1.GetSeckillResultResponse
+	20, // 23: api.seckill.v1.Seckill.PaySeckillOrder:output_type -> api.seckill.v1.PaySeckillOrderResponse
+	22, // 24: api.seckill.v1.Seckill.PayCallback:output_type -> api.seckill.v1.PayCallbackReply
+	24, // 25: api.seckill.v1.Seckill.ReplayDeadLetter:output_type -> api.seckill.v1.ReplayDeadLetterReply
+	17, // [17:26] is the sub-list for method output_type
+	8,  // [8:17] is the sub-list for method input_type
 	8,  // [8:8] is the sub-list for extension type_name
 	8,  // [8:8] is the sub-list for extension extendee
 	0,  // [0:8] is the sub-list for field type_name
@@ -2091,7 +2349,7 @@ func file_seckill_v1_seckill_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_seckill_v1_seckill_proto_rawDesc), len(file_seckill_v1_seckill_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   21,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

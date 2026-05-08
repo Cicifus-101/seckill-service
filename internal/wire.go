@@ -28,6 +28,9 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(biz.RateLimiter), new(*cache.RateLimiter)),
 	wire.Bind(new(biz.IdempotentChecker), new(*cache.IdempotentChecker)),
 
+	biz.NewOrderCancelService,
+	biz.NewIDGenerator,
+
 	// 任务层
 	job.NewDelayQueue,
 	job.NewCompensateTask,
@@ -36,9 +39,11 @@ var ProviderSet = wire.NewSet(
 
 	kafka.NewProducer,
 	kafka.NewConsumer,
+	kafka.NewDLQConsumer,
+
 	// 消息队列层
 	wire.Bind(new(biz.MQProducer), new(*kafka.Producer)),
-	
+
 	service.NewSeckillService,
 	// 业务层
 	biz.NewSeckillUsecase,

@@ -30,6 +30,7 @@ func newSeckillOrder(db *gorm.DB, opts ...gen.DOOption) seckillOrder {
 	_seckillOrder.ALL = field.NewAsterisk(tableName)
 	_seckillOrder.ID = field.NewUint64(tableName, "id")
 	_seckillOrder.OrderNo = field.NewString(tableName, "order_no")
+	_seckillOrder.RequestID = field.NewString(tableName, "request_id")
 	_seckillOrder.UserID = field.NewUint64(tableName, "user_id")
 	_seckillOrder.ActivityID = field.NewUint64(tableName, "activity_id")
 	_seckillOrder.ProductID = field.NewUint64(tableName, "product_id")
@@ -39,7 +40,9 @@ func newSeckillOrder(db *gorm.DB, opts ...gen.DOOption) seckillOrder {
 	_seckillOrder.SeckillPrice = field.NewUint64(tableName, "seckill_price")
 	_seckillOrder.Quantity = field.NewUint32(tableName, "quantity")
 	_seckillOrder.OrderAmount = field.NewUint64(tableName, "order_amount")
+	_seckillOrder.FinalAmount = field.NewUint64(tableName, "final_amount")
 	_seckillOrder.CouponID = field.NewUint64(tableName, "coupon_id")
+	_seckillOrder.CouponDiscount = field.NewUint64(tableName, "coupon_discount")
 	_seckillOrder.AddressID = field.NewUint64(tableName, "address_id")
 	_seckillOrder.Status = field.NewUint32(tableName, "status")
 	_seckillOrder.PayTime = field.NewTime(tableName, "pay_time")
@@ -55,24 +58,27 @@ func newSeckillOrder(db *gorm.DB, opts ...gen.DOOption) seckillOrder {
 type seckillOrder struct {
 	seckillOrderDo seckillOrderDo
 
-	ALL          field.Asterisk
-	ID           field.Uint64 // 订单ID
-	OrderNo      field.String // 订单编号
-	UserID       field.Uint64 // 用户ID
-	ActivityID   field.Uint64 // 活动ID
-	ProductID    field.Uint64 // 商品ID
-	SkuID        field.Uint64 // 秒杀商品关联ID
-	ProductName  field.String // 商品名称（快照）
-	ProductImage field.String // 商品图片（快照）
-	SeckillPrice field.Uint64 // 秒杀单价（快照，单位：分）
-	Quantity     field.Uint32 // 购买数量
-	OrderAmount  field.Uint64 // 订单总金额（单位：分）
-	CouponID     field.Uint64 // 使用的优惠券ID
-	AddressID    field.Uint64 // 收货地址ID
-	Status       field.Uint32 // 状态：0-待支付，1-已支付，2-已取消，3-已退款
-	PayTime      field.Time   // 支付时间
-	CreateTime   field.Time   // 创建时间
-	UpdateTime   field.Time   // 更新时间
+	ALL            field.Asterisk
+	ID             field.Uint64 // 订单ID
+	OrderNo        field.String // 订单编号
+	RequestID      field.String // 请求ID（幂等）
+	UserID         field.Uint64 // 用户ID
+	ActivityID     field.Uint64 // 活动ID
+	ProductID      field.Uint64 // 商品ID
+	SkuID          field.Uint64 // 秒杀商品关联ID
+	ProductName    field.String // 商品名称（快照）
+	ProductImage   field.String // 商品图片（快照）
+	SeckillPrice   field.Uint64 // 秒杀单价（快照，单位：分）
+	Quantity       field.Uint32 // 购买数量
+	OrderAmount    field.Uint64 // 订单总金额（单位：分）
+	FinalAmount    field.Uint64 // 实际支付金额（单位：分）
+	CouponID       field.Uint64 // 使用的优惠券ID
+	CouponDiscount field.Uint64 // 优惠金额（单位：分）
+	AddressID      field.Uint64 // 收货地址ID
+	Status         field.Uint32 // 状态：0-待支付，1-已支付，2-已取消，3-已退款
+	PayTime        field.Time   // 支付时间
+	CreateTime     field.Time   // 创建时间
+	UpdateTime     field.Time   // 更新时间
 
 	fieldMap map[string]field.Expr
 }
@@ -91,6 +97,7 @@ func (s *seckillOrder) updateTableName(table string) *seckillOrder {
 	s.ALL = field.NewAsterisk(table)
 	s.ID = field.NewUint64(table, "id")
 	s.OrderNo = field.NewString(table, "order_no")
+	s.RequestID = field.NewString(table, "request_id")
 	s.UserID = field.NewUint64(table, "user_id")
 	s.ActivityID = field.NewUint64(table, "activity_id")
 	s.ProductID = field.NewUint64(table, "product_id")
@@ -100,7 +107,9 @@ func (s *seckillOrder) updateTableName(table string) *seckillOrder {
 	s.SeckillPrice = field.NewUint64(table, "seckill_price")
 	s.Quantity = field.NewUint32(table, "quantity")
 	s.OrderAmount = field.NewUint64(table, "order_amount")
+	s.FinalAmount = field.NewUint64(table, "final_amount")
 	s.CouponID = field.NewUint64(table, "coupon_id")
+	s.CouponDiscount = field.NewUint64(table, "coupon_discount")
 	s.AddressID = field.NewUint64(table, "address_id")
 	s.Status = field.NewUint32(table, "status")
 	s.PayTime = field.NewTime(table, "pay_time")
@@ -134,9 +143,10 @@ func (s *seckillOrder) GetFieldByName(fieldName string) (field.OrderExpr, bool) 
 }
 
 func (s *seckillOrder) fillFieldMap() {
-	s.fieldMap = make(map[string]field.Expr, 17)
+	s.fieldMap = make(map[string]field.Expr, 20)
 	s.fieldMap["id"] = s.ID
 	s.fieldMap["order_no"] = s.OrderNo
+	s.fieldMap["request_id"] = s.RequestID
 	s.fieldMap["user_id"] = s.UserID
 	s.fieldMap["activity_id"] = s.ActivityID
 	s.fieldMap["product_id"] = s.ProductID
@@ -146,7 +156,9 @@ func (s *seckillOrder) fillFieldMap() {
 	s.fieldMap["seckill_price"] = s.SeckillPrice
 	s.fieldMap["quantity"] = s.Quantity
 	s.fieldMap["order_amount"] = s.OrderAmount
+	s.fieldMap["final_amount"] = s.FinalAmount
 	s.fieldMap["coupon_id"] = s.CouponID
+	s.fieldMap["coupon_discount"] = s.CouponDiscount
 	s.fieldMap["address_id"] = s.AddressID
 	s.fieldMap["status"] = s.Status
 	s.fieldMap["pay_time"] = s.PayTime

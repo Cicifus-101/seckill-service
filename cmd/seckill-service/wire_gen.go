@@ -54,14 +54,20 @@ func wireApp(s *conf.Server, d *conf.Data, k *conf.Kafka, logger log.Logger) (*k
 	if err != nil {
 		return nil, nil, err
 	}
+	dlqConsumer, err := kafka.NewDLQConsumer(config, seckillRepo, logger)
+	if err != nil {
+		return nil, nil, err
+	}
 	compensateTask := job.NewCompensateTask(client, seckillRepo, cacheRepo, logger)
-	backgroundTasks := NewBackgroundTasks(consumer, delayQueue, compensateTask, seckillUsecase)
+	backgroundTasks := NewBackgroundTasks(consumer, dlqConsumer, delayQueue, compensateTask, seckillUsecase)
 	app := newApp(logger, grpcServer, httpServer, backgroundTasks)
 	return app, func() {
 	}, nil
 }
 
 // wire.go:
+
+const warmUpActivityID uint64 = 3
 
 // provideRedis 提供 Redis 客户端
 func provideRedis(c *conf.Data) *redis.Client {
@@ -79,6 +85,7 @@ func provideKafkaConfig(k *conf.Kafka) *kafka.Config {
 // BackgroundTasks 后台任务启动器
 type BackgroundTasks struct {
 	Consumer       *kafka.Consumer
+	DLQConsumer    *kafka.DLQConsumer
 	DelayQueue     *job.DelayQueue
 	CompensateTask *job.CompensateTask
 	SeckillUsecase *biz.SeckillUsecase
@@ -87,12 +94,14 @@ type BackgroundTasks struct {
 // NewBackgroundTasks 创建后台任务启动器
 func NewBackgroundTasks(
 	consumer *kafka.Consumer,
+	dlqConsumer *kafka.DLQConsumer,
 	delayQueue *job.DelayQueue,
 	compensateTask *job.CompensateTask,
 	seckillUsecase *biz.SeckillUsecase,
 ) *BackgroundTasks {
 	return &BackgroundTasks{
 		Consumer:       consumer,
+		DLQConsumer:    dlqConsumer,
 		DelayQueue:     delayQueue,
 		CompensateTask: compensateTask,
 		SeckillUsecase: seckillUsecase,
@@ -103,17 +112,24 @@ func NewBackgroundTasks(
 func (b *BackgroundTasks) Start(ctx context.Context, logger log.Logger) {
 	helper := log.NewHelper(logger)
 
-	helper.Info("开始预热缓存...")
-	if err := b.SeckillUsecase.WarmUpSeckillCache(ctx, 1); err != nil {
+	helper.Infof("开始预热缓存, activity=%d...", warmUpActivityID)
+	if err := b.SeckillUsecase.WarmUpSeckillCache(ctx, warmUpActivityID); err != nil {
 		helper.Warnf("预热缓存失败: %v", err)
 	} else {
-		helper.Info("缓存预热完成")
+		helper.Infof("缓存预热完成, activity=%d", warmUpActivityID)
 	}
 
 	helper.Info("启动 Kafka 主消费者...")
 	if err := b.Consumer.Start(ctx); err != nil {
 		helper.Errorf("启动 Kafka 消费者失败: %v", err)
 	}
+
+	helper.Info("启动 Kafka DLQ 消费者...")
+	go func() {
+		if err := b.DLQConsumer.Start(ctx); err != nil {
+			helper.Errorf("启动 Kafka DLQ 消费者失败: %v", err)
+		}
+	}()
 
 	helper.Info("启动延迟队列...")
 	go b.DelayQueue.Start(ctx)
@@ -128,6 +144,10 @@ func (b *BackgroundTasks) Start(ctx context.Context, logger log.Logger) {
 func (b *BackgroundTasks) Stop(ctx context.Context, logger log.Logger) {
 	helper := log.NewHelper(logger)
 	helper.Info("正在停止后台任务...")
+
+	if err := b.DLQConsumer.Stop(); err != nil {
+		helper.Errorf("停止 Kafka DLQ 消费者失败: %v", err)
+	}
 
 	if err := b.Consumer.Stop(); err != nil {
 		helper.Errorf("停止 Kafka 消费者失败: %v", err)

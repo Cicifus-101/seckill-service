@@ -45,6 +45,12 @@ service Seckill{
   rpc PaySeckillOrder (PaySeckillOrderRequest) returns (PaySeckillOrderResponse) {
   }
 
+  // 支付回调
+  rpc PayCallback(PayCallbackRequest) returns (PayCallbackReply) {
+  }
+
+  rpc ReplayDeadLetter(ReplayDeadLetterRequest) returns (ReplayDeadLetterReply) {
+  }
 }
 
 //   ------------1.秒杀商品浏览------------
@@ -269,3 +275,27 @@ message PaySeckillOrderResponse {
   string platform_number = 5;  //支付平台流水号
 }
 
+// ----------------7.支付------------------
+
+message PayCallbackRequest {
+  string order_no = 1;
+  string platform_number = 2;
+  int64 pay_amount = 3;
+  string platform_status = 4;
+  int64 pay_time = 5;
+  string sign = 6;
+}
+
+message PayCallbackReply {
+  bool success = 1;
+  string message = 2;
+}
+
+message ReplayDeadLetterRequest {
+  string event_id = 1;
+}
+
+message ReplayDeadLetterReply {
+  bool success = 1;
+  string message = 2;
+}

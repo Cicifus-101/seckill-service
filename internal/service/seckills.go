@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	stderrors "errors"
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	v1 "seckill-service/api/seckill/v1"
 	"seckill-service/internal/biz"
+	"seckill-service/internal/observability"
+	"time"
 )
 
 type SeckillService struct {
@@ -24,8 +27,19 @@ func NewSeckillService(uc *biz.SeckillUsecase, logger log.Logger) *SeckillServic
 }
 
 // SeckillProducts 查询秒杀商品列表
-func (s *SeckillService) SeckillProducts(ctx context.Context, req *v1.SeckillProductsRequest) (*v1.SeckillProductsResponse, error) {
-	s.log.WithContext(ctx).Infof("SeckillProducts req: %+v", req)
+func (s *SeckillService) SeckillProducts(ctx context.Context, req *v1.SeckillProductsRequest) (_ *v1.SeckillProductsResponse, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "service.SeckillProducts")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("service", "SeckillProducts", result, start)
+	}()
+
+	s.log.WithContext(ctx).Infof("SeckillProducts trace_id=%s req=%+v", observability.TraceID(ctx), req)
 
 	res, err := s.uc.ListSeckillProducts(ctx, req.UserId, req.ActivityId, req.Page, req.PageSize, req.SortType)
 	if err != nil {
@@ -69,8 +83,20 @@ func (s *SeckillService) SeckillProducts(ctx context.Context, req *v1.SeckillPro
 }
 
 // SeckillProductDetail 查询秒杀商品详情
-func (s *SeckillService) SeckillProductDetail(ctx context.Context, req *v1.SeckillProductDetailRequest) (*v1.SeckillProductDetailResponse, error) {
-	s.log.WithContext(ctx).Infof("SeckillProductDetail req: %+v", req)
+func (s *SeckillService) SeckillProductDetail(ctx context.Context, req *v1.SeckillProductDetailRequest) (_ *v1.SeckillProductDetailResponse, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "service.SeckillProductDetail")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("service", "SeckillProductDetail", result, start)
+	}()
+
+	s.log.WithContext(ctx).Infof("SeckillProductDetail trace_id=%s req=%+v", observability.TraceID(ctx), req)
+
 	res, err := s.uc.GetSeckillProductDetail(ctx, uint64(req.UserId), uint64(req.ProductId), uint64(req.ActivityId))
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "商品不存在: %v", err)
@@ -111,8 +137,20 @@ func (s *SeckillService) SeckillProductDetail(ctx context.Context, req *v1.Secki
 }
 
 // GetCurrentActivity 获取当前活动
-func (s *SeckillService) GetCurrentActivity(ctx context.Context, req *v1.GetCurrentActivityRequest) (*v1.GetCurrentActivityResponse, error) {
-	s.log.WithContext(ctx).Info("GetCurrentActivity")
+func (s *SeckillService) GetCurrentActivity(ctx context.Context, req *v1.GetCurrentActivityRequest) (_ *v1.GetCurrentActivityResponse, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "service.GetCurrentActivity")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("service", "GetCurrentActivity", result, start)
+	}()
+
+	s.log.WithContext(ctx).Infof("GetCurrentActivity trace_id=%s req=%+v", observability.TraceID(ctx), req)
+
 	activity, productCount, err := s.uc.Repo.GetCurrentActivity(ctx)
 	if err != nil {
 		if errors.Is(err, biz.ErrNoActiveActivity) {
@@ -138,8 +176,19 @@ func (s *SeckillService) GetCurrentActivity(ctx context.Context, req *v1.GetCurr
 }
 
 // CreateSeckillOrder 创建秒杀订单
-func (s *SeckillService) CreateSeckillOrder(ctx context.Context, req *v1.CreateSeckillOrderRequest) (*v1.CreateSeckillOrderResponse, error) {
-	s.log.WithContext(ctx).Infof("CreateSeckillOrder req: %+v", req)
+func (s *SeckillService) CreateSeckillOrder(ctx context.Context, req *v1.CreateSeckillOrderRequest) (_ *v1.CreateSeckillOrderResponse, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "service.CreateSeckillOrder")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("service", "CreateSeckillOrder", result, start)
+	}()
+
+	s.log.WithContext(ctx).Infof("CreateSeckillOrder trace_id=%s req=%+v", observability.TraceID(ctx), req)
 
 	// 参数校验
 	if req.UserId == 0 {
@@ -197,14 +246,30 @@ func (s *SeckillService) CreateSeckillOrder(ctx context.Context, req *v1.CreateS
 }
 
 // GetSeckillOrder 查询秒杀订单
-func (s *SeckillService) GetSeckillOrder(ctx context.Context, req *v1.GetSeckillOrderRequest) (*v1.GetSeckillOrderResponse, error) {
-	s.log.WithContext(ctx).Infof("GetSeckillOrder req: %+v", req)
+func (s *SeckillService) GetSeckillOrder(ctx context.Context, req *v1.GetSeckillOrderRequest) (_ *v1.GetSeckillOrderResponse, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "service.GetSeckillOrder")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("service", "GetSeckillOrder", result, start)
+	}()
+
+	s.log.WithContext(ctx).Infof("GetSeckillOrder trace_id=%s req=%+v", observability.TraceID(ctx), req)
+
 	order, err := s.uc.GetSeckillOrder(ctx, req.OrderNo, uint64(req.UserId))
 	if err != nil {
-		if errors.Is(err, biz.ErrOrderNotFound) {
-			return nil, status.Errorf(codes.NotFound, "订单不存在")
+		if stderrors.Is(err, biz.ErrOrderNotFound) {
+			return nil, errors.NotFound("ORDER_NOT_FOUND", "订单不存在")
 		}
-		return nil, status.Errorf(codes.Internal, "查询失败: %v", err)
+		if stderrors.Is(err, biz.ErrUserNotMatch) {
+			return nil, errors.Forbidden("USER_NOT_MATCH", "用户不匹配")
+		}
+		s.log.WithContext(ctx).Errorf("GetSeckillOrder failed: %v", err)
+		return nil, errors.InternalServer("QUERY_ORDER_FAILED", "查询订单失败")
 	}
 
 	resp := &v1.GetSeckillOrderResponse{
@@ -242,8 +307,19 @@ func (s *SeckillService) GetSeckillOrder(ctx context.Context, req *v1.GetSeckill
 }
 
 // GetSeckillResult 获取秒杀结果
-func (s *SeckillService) GetSeckillResult(ctx context.Context, req *v1.GetSeckillResultRequest) (*v1.GetSeckillResultResponse, error) {
-	s.log.WithContext(ctx).Infof("GetSeckillResult req: %+v", req)
+func (s *SeckillService) GetSeckillResult(ctx context.Context, req *v1.GetSeckillResultRequest) (_ *v1.GetSeckillResultResponse, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "service.GetSeckillResult")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("service", "GetSeckillResult", result, start)
+	}()
+
+	s.log.WithContext(ctx).Infof("GetSeckillResult trace_id=%s req=%+v", observability.TraceID(ctx), req)
 
 	res, err := s.uc.GetSeckillResult(ctx, uint64(req.UserId), req.RequestId)
 	if err != nil {
@@ -259,8 +335,19 @@ func (s *SeckillService) GetSeckillResult(ctx context.Context, req *v1.GetSeckil
 }
 
 // PaySeckillOrder 支付秒杀订单
-func (s *SeckillService) PaySeckillOrder(ctx context.Context, req *v1.PaySeckillOrderRequest) (*v1.PaySeckillOrderResponse, error) {
-	s.log.WithContext(ctx).Infof("PaySeckillOrder req: %+v", req)
+func (s *SeckillService) PaySeckillOrder(ctx context.Context, req *v1.PaySeckillOrderRequest) (_ *v1.PaySeckillOrderResponse, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "service.PaySeckillOrder")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("service", "PaySeckillOrder", result, start)
+	}()
+
+	s.log.WithContext(ctx).Infof("PaySeckillOrder trace_id=%s req=%+v", observability.TraceID(ctx), req)
 
 	result, err := s.uc.PaySeckillOrder(ctx, &biz.PayOrderRequest{
 		OrderNo:     req.OrderNo,
@@ -278,5 +365,83 @@ func (s *SeckillService) PaySeckillOrder(ctx context.Context, req *v1.PaySeckill
 		PayUrl:         "",
 		PayAmount:      int64(result.PayAmount),
 		PlatformNumber: result.PlatformNumber,
+	}, nil
+}
+
+func (s *SeckillService) PayCallback(ctx context.Context, req *v1.PayCallbackRequest) (_ *v1.PayCallbackReply, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "service.PayCallback")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("service", "PayCallback", result, start)
+	}()
+
+	s.log.WithContext(ctx).Infof("PayCallback trace_id=%s req=%+v", observability.TraceID(ctx), req)
+
+	res, err := s.uc.HandlePayCallback(ctx, &biz.PayCallbackRequest{
+		OrderNo:        req.OrderNo,
+		PlatformNumber: req.PlatformNumber,
+		PayAmount:      uint64(req.PayAmount),
+		PlatformStatus: req.PlatformStatus,
+		PayTime:        req.PayTime,
+		Sign:           req.Sign,
+	})
+
+	if err != nil {
+		return nil, mapPayCallbackError(err)
+	}
+
+	return &v1.PayCallbackReply{
+		Success: res.Success,
+		Message: res.Message,
+	}, nil
+}
+
+func mapPayCallbackError(err error) error {
+	switch {
+	case stderrors.Is(err, biz.ErrInvalidPaySign):
+		return status.Error(codes.PermissionDenied, err.Error())
+	case stderrors.Is(err, biz.ErrPayInfoNotFound), stderrors.Is(err, biz.ErrOrderNotFound):
+		return status.Error(codes.NotFound, err.Error())
+	case stderrors.Is(err, biz.ErrPayAmountMismatch):
+		return status.Error(codes.FailedPrecondition, err.Error())
+	case stderrors.Is(err, biz.ErrOrderStatusIncorrect):
+		return status.Error(codes.FailedPrecondition, err.Error())
+	default:
+		return status.Error(codes.Internal, err.Error())
+	}
+}
+
+func (s *SeckillService) ReplayDeadLetter(ctx context.Context, req *v1.ReplayDeadLetterRequest) (_ *v1.ReplayDeadLetterReply, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "service.ReplayDeadLetter")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("service", "ReplayDeadLetter", result, start)
+	}()
+
+	s.log.WithContext(ctx).Infof("ReplayDeadLetter trace_id=%s req=%+v", observability.TraceID(ctx), req)
+	if req.EventId == "" {
+		return nil, status.Error(codes.InvalidArgument, "event_id不能为空")
+	}
+	if err := s.uc.ReplayDeadLetter(ctx, req.EventId); err != nil {
+		switch {
+		case errors.Is(err, biz.ErrDeadLetterNotFound):
+			return nil, status.Error(codes.NotFound, err.Error())
+		default:
+			return nil, status.Error(codes.Internal, err.Error())
+		}
+	}
+	return &v1.ReplayDeadLetterReply{
+		Success: true,
+		Message: "重放成功",
 	}, nil
 }

@@ -16,34 +16,44 @@ import (
 )
 
 var (
-	Q       = new(Query)
-	PayInfo *payInfo
+	Q                   = new(Query)
+	MessageOutbox       *messageOutbox
+	MqDeadLetterMessage *mqDeadLetterMessage
+	PayInfo             *payInfo
 )
 
 func SetDefault(db *gorm.DB, opts ...gen.DOOption) {
 	*Q = *Use(db, opts...)
+	MessageOutbox = &Q.MessageOutbox
+	MqDeadLetterMessage = &Q.MqDeadLetterMessage
 	PayInfo = &Q.PayInfo
 }
 
 func Use(db *gorm.DB, opts ...gen.DOOption) *Query {
 	return &Query{
-		db:      db,
-		PayInfo: newPayInfo(db, opts...),
+		db:                  db,
+		MessageOutbox:       newMessageOutbox(db, opts...),
+		MqDeadLetterMessage: newMqDeadLetterMessage(db, opts...),
+		PayInfo:             newPayInfo(db, opts...),
 	}
 }
 
 type Query struct {
 	db *gorm.DB
 
-	PayInfo payInfo
+	MessageOutbox       messageOutbox
+	MqDeadLetterMessage mqDeadLetterMessage
+	PayInfo             payInfo
 }
 
 func (q *Query) Available() bool { return q.db != nil }
 
 func (q *Query) clone(db *gorm.DB) *Query {
 	return &Query{
-		db:      db,
-		PayInfo: q.PayInfo.clone(db),
+		db:                  db,
+		MessageOutbox:       q.MessageOutbox.clone(db),
+		MqDeadLetterMessage: q.MqDeadLetterMessage.clone(db),
+		PayInfo:             q.PayInfo.clone(db),
 	}
 }
 
@@ -57,18 +67,24 @@ func (q *Query) WriteDB() *Query {
 
 func (q *Query) ReplaceDB(db *gorm.DB) *Query {
 	return &Query{
-		db:      db,
-		PayInfo: q.PayInfo.replaceDB(db),
+		db:                  db,
+		MessageOutbox:       q.MessageOutbox.replaceDB(db),
+		MqDeadLetterMessage: q.MqDeadLetterMessage.replaceDB(db),
+		PayInfo:             q.PayInfo.replaceDB(db),
 	}
 }
 
 type queryCtx struct {
-	PayInfo IPayInfoDo
+	MessageOutbox       IMessageOutboxDo
+	MqDeadLetterMessage IMqDeadLetterMessageDo
+	PayInfo             IPayInfoDo
 }
 
 func (q *Query) WithContext(ctx context.Context) *queryCtx {
 	return &queryCtx{
-		PayInfo: q.PayInfo.WithContext(ctx),
+		MessageOutbox:       q.MessageOutbox.WithContext(ctx),
+		MqDeadLetterMessage: q.MqDeadLetterMessage.WithContext(ctx),
+		PayInfo:             q.PayInfo.WithContext(ctx),
 	}
 }
 

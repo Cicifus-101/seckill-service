@@ -27,6 +27,8 @@ type Bootstrap struct {
 	Server        *Server                `protobuf:"bytes,1,opt,name=server,proto3" json:"server,omitempty"`
 	Data          *Data                  `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
 	Kafka         *Kafka                 `protobuf:"bytes,3,opt,name=kafka,proto3" json:"kafka,omitempty"`
+	Observability *Observability         `protobuf:"bytes,4,opt,name=observability,proto3" json:"observability,omitempty"`
+	Nacos         *Nacos                 `protobuf:"bytes,5,opt,name=nacos,proto3" json:"nacos,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -78,6 +80,20 @@ func (x *Bootstrap) GetData() *Data {
 func (x *Bootstrap) GetKafka() *Kafka {
 	if x != nil {
 		return x.Kafka
+	}
+	return nil
+}
+
+func (x *Bootstrap) GetObservability() *Observability {
+	if x != nil {
+		return x.Observability
+	}
+	return nil
+}
+
+func (x *Bootstrap) GetNacos() *Nacos {
+	if x != nil {
+		return x.Nacos
 	}
 	return nil
 }
@@ -302,6 +318,198 @@ func (x *Kafka) GetTopics() *Kafka_Topics {
 	return nil
 }
 
+type Observability struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Enabled       bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"` //是否启用可观测性
+	ServiceName   string                 `protobuf:"bytes,2,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`
+	Env           string                 `protobuf:"bytes,3,opt,name=env,proto3" json:"env,omitempty"`
+	OtelEndpoint  string                 `protobuf:"bytes,4,opt,name=otel_endpoint,json=otelEndpoint,proto3" json:"otel_endpoint,omitempty"`     // OpenTelemetry 收集器地址
+	SampleRatio   float64                `protobuf:"fixed64,5,opt,name=sample_ratio,json=sampleRatio,proto3" json:"sample_ratio,omitempty"`      // 链路采样率
+	EnableMetrics bool                   `protobuf:"varint,6,opt,name=enable_metrics,json=enableMetrics,proto3" json:"enable_metrics,omitempty"` // 是否启用指标采集
+	MetricsAddr   string                 `protobuf:"bytes,7,opt,name=metrics_addr,json=metricsAddr,proto3" json:"metrics_addr,omitempty"`        // Prometheus 指标暴露地址
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Observability) Reset() {
+	*x = Observability{}
+	mi := &file_conf_conf_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Observability) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Observability) ProtoMessage() {}
+
+func (x *Observability) ProtoReflect() protoreflect.Message {
+	mi := &file_conf_conf_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Observability.ProtoReflect.Descriptor instead.
+func (*Observability) Descriptor() ([]byte, []int) {
+	return file_conf_conf_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *Observability) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *Observability) GetServiceName() string {
+	if x != nil {
+		return x.ServiceName
+	}
+	return ""
+}
+
+func (x *Observability) GetEnv() string {
+	if x != nil {
+		return x.Env
+	}
+	return ""
+}
+
+func (x *Observability) GetOtelEndpoint() string {
+	if x != nil {
+		return x.OtelEndpoint
+	}
+	return ""
+}
+
+func (x *Observability) GetSampleRatio() float64 {
+	if x != nil {
+		return x.SampleRatio
+	}
+	return 0
+}
+
+func (x *Observability) GetEnableMetrics() bool {
+	if x != nil {
+		return x.EnableMetrics
+	}
+	return false
+}
+
+func (x *Observability) GetMetricsAddr() string {
+	if x != nil {
+		return x.MetricsAddr
+	}
+	return ""
+}
+
+type Nacos struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Enabled       bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Addr          string                 `protobuf:"bytes,2,opt,name=addr,proto3" json:"addr,omitempty"`
+	Namespace     string                 `protobuf:"bytes,3,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	Group         string                 `protobuf:"bytes,4,opt,name=group,proto3" json:"group,omitempty"`                 // 配置分组
+	DataId        string                 `protobuf:"bytes,5,opt,name=data_id,json=dataId,proto3" json:"data_id,omitempty"` // 配置数据ID
+	Username      string                 `protobuf:"bytes,6,opt,name=username,proto3" json:"username,omitempty"`
+	Password      string                 `protobuf:"bytes,7,opt,name=password,proto3" json:"password,omitempty"`
+	ServiceName   string                 `protobuf:"bytes,8,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Nacos) Reset() {
+	*x = Nacos{}
+	mi := &file_conf_conf_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Nacos) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Nacos) ProtoMessage() {}
+
+func (x *Nacos) ProtoReflect() protoreflect.Message {
+	mi := &file_conf_conf_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Nacos.ProtoReflect.Descriptor instead.
+func (*Nacos) Descriptor() ([]byte, []int) {
+	return file_conf_conf_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *Nacos) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *Nacos) GetAddr() string {
+	if x != nil {
+		return x.Addr
+	}
+	return ""
+}
+
+func (x *Nacos) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
+func (x *Nacos) GetGroup() string {
+	if x != nil {
+		return x.Group
+	}
+	return ""
+}
+
+func (x *Nacos) GetDataId() string {
+	if x != nil {
+		return x.DataId
+	}
+	return ""
+}
+
+func (x *Nacos) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *Nacos) GetPassword() string {
+	if x != nil {
+		return x.Password
+	}
+	return ""
+}
+
+func (x *Nacos) GetServiceName() string {
+	if x != nil {
+		return x.ServiceName
+	}
+	return ""
+}
+
 type Server_HTTP struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Network       string                 `protobuf:"bytes,1,opt,name=network,proto3" json:"network,omitempty"`
@@ -313,7 +521,7 @@ type Server_HTTP struct {
 
 func (x *Server_HTTP) Reset() {
 	*x = Server_HTTP{}
-	mi := &file_conf_conf_proto_msgTypes[4]
+	mi := &file_conf_conf_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -325,7 +533,7 @@ func (x *Server_HTTP) String() string {
 func (*Server_HTTP) ProtoMessage() {}
 
 func (x *Server_HTTP) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_conf_proto_msgTypes[4]
+	mi := &file_conf_conf_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -373,7 +581,7 @@ type Server_GRPC struct {
 
 func (x *Server_GRPC) Reset() {
 	*x = Server_GRPC{}
-	mi := &file_conf_conf_proto_msgTypes[5]
+	mi := &file_conf_conf_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -385,7 +593,7 @@ func (x *Server_GRPC) String() string {
 func (*Server_GRPC) ProtoMessage() {}
 
 func (x *Server_GRPC) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_conf_proto_msgTypes[5]
+	mi := &file_conf_conf_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -432,7 +640,7 @@ type Data_Database struct {
 
 func (x *Data_Database) Reset() {
 	*x = Data_Database{}
-	mi := &file_conf_conf_proto_msgTypes[6]
+	mi := &file_conf_conf_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -444,7 +652,7 @@ func (x *Data_Database) String() string {
 func (*Data_Database) ProtoMessage() {}
 
 func (x *Data_Database) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_conf_proto_msgTypes[6]
+	mi := &file_conf_conf_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -487,7 +695,7 @@ type Data_Redis struct {
 
 func (x *Data_Redis) Reset() {
 	*x = Data_Redis{}
-	mi := &file_conf_conf_proto_msgTypes[7]
+	mi := &file_conf_conf_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -499,7 +707,7 @@ func (x *Data_Redis) String() string {
 func (*Data_Redis) ProtoMessage() {}
 
 func (x *Data_Redis) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_conf_proto_msgTypes[7]
+	mi := &file_conf_conf_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -552,20 +760,22 @@ func (x *Data_Redis) GetWriteTimeout() *durationpb.Duration {
 
 // Producer 配置
 type Kafka_Producer struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	MaxMessageBytes int32                  `protobuf:"varint,1,opt,name=max_message_bytes,json=maxMessageBytes,proto3" json:"max_message_bytes,omitempty"`
-	RequiredAcks    int32                  `protobuf:"varint,2,opt,name=required_acks,json=requiredAcks,proto3" json:"required_acks,omitempty"`
-	Compression     string                 `protobuf:"bytes,3,opt,name=compression,proto3" json:"compression,omitempty"`
-	RetryMax        int32                  `protobuf:"varint,4,opt,name=retry_max,json=retryMax,proto3" json:"retry_max,omitempty"`
-	RetryBackoff    *durationpb.Duration   `protobuf:"bytes,5,opt,name=retry_backoff,json=retryBackoff,proto3" json:"retry_backoff,omitempty"`
-	Timeout         *durationpb.Duration   `protobuf:"bytes,6,opt,name=timeout,proto3" json:"timeout,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	MaxMessageBytes   int32                  `protobuf:"varint,1,opt,name=max_message_bytes,json=maxMessageBytes,proto3" json:"max_message_bytes,omitempty"`
+	RequiredAcks      int32                  `protobuf:"varint,2,opt,name=required_acks,json=requiredAcks,proto3" json:"required_acks,omitempty"`
+	Compression       string                 `protobuf:"bytes,3,opt,name=compression,proto3" json:"compression,omitempty"`
+	RetryMax          int32                  `protobuf:"varint,4,opt,name=retry_max,json=retryMax,proto3" json:"retry_max,omitempty"`
+	RetryBackoff      *durationpb.Duration   `protobuf:"bytes,5,opt,name=retry_backoff,json=retryBackoff,proto3" json:"retry_backoff,omitempty"`
+	Timeout           *durationpb.Duration   `protobuf:"bytes,6,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	EnableIdempotence bool                   `protobuf:"varint,7,opt,name=enable_idempotence,json=enableIdempotence,proto3" json:"enable_idempotence,omitempty"` // 是否启用幂等性
+	MaxInFlight       int32                  `protobuf:"varint,8,opt,name=max_in_flight,json=maxInFlight,proto3" json:"max_in_flight,omitempty"`                 // 最大在途请求数
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *Kafka_Producer) Reset() {
 	*x = Kafka_Producer{}
-	mi := &file_conf_conf_proto_msgTypes[8]
+	mi := &file_conf_conf_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -577,7 +787,7 @@ func (x *Kafka_Producer) String() string {
 func (*Kafka_Producer) ProtoMessage() {}
 
 func (x *Kafka_Producer) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_conf_proto_msgTypes[8]
+	mi := &file_conf_conf_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -635,6 +845,20 @@ func (x *Kafka_Producer) GetTimeout() *durationpb.Duration {
 	return nil
 }
 
+func (x *Kafka_Producer) GetEnableIdempotence() bool {
+	if x != nil {
+		return x.EnableIdempotence
+	}
+	return false
+}
+
+func (x *Kafka_Producer) GetMaxInFlight() int32 {
+	if x != nil {
+		return x.MaxInFlight
+	}
+	return 0
+}
+
 // Consumer 配置
 type Kafka_Consumer struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
@@ -650,7 +874,7 @@ type Kafka_Consumer struct {
 
 func (x *Kafka_Consumer) Reset() {
 	*x = Kafka_Consumer{}
-	mi := &file_conf_conf_proto_msgTypes[9]
+	mi := &file_conf_conf_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -662,7 +886,7 @@ func (x *Kafka_Consumer) String() string {
 func (*Kafka_Consumer) ProtoMessage() {}
 
 func (x *Kafka_Consumer) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_conf_proto_msgTypes[9]
+	mi := &file_conf_conf_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -722,18 +946,19 @@ func (x *Kafka_Consumer) GetMaxWaitTime() *durationpb.Duration {
 
 // 主题配置
 type Kafka_Topics struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SeckillOrder  string                 `protobuf:"bytes,1,opt,name=seckill_order,json=seckillOrder,proto3" json:"seckill_order,omitempty"`    // 秒杀订单主Topic
-	SeckillResult string                 `protobuf:"bytes,2,opt,name=seckill_result,json=seckillResult,proto3" json:"seckill_result,omitempty"` // 秒杀结果Topic
-	SeckillDlq    string                 `protobuf:"bytes,3,opt,name=seckill_dlq,json=seckillDlq,proto3" json:"seckill_dlq,omitempty"`          // 死信队列Topic
-	SeckillRetry  string                 `protobuf:"bytes,4,opt,name=seckill_retry,json=seckillRetry,proto3" json:"seckill_retry,omitempty"`    // 重试队列Topic（延迟队列）
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	SeckillOrder     string                 `protobuf:"bytes,1,opt,name=seckill_order,json=seckillOrder,proto3" json:"seckill_order,omitempty"`    // 秒杀订单主Topic
+	SeckillResult    string                 `protobuf:"bytes,2,opt,name=seckill_result,json=seckillResult,proto3" json:"seckill_result,omitempty"` // 秒杀结果Topic
+	SeckillDlq       string                 `protobuf:"bytes,3,opt,name=seckill_dlq,json=seckillDlq,proto3" json:"seckill_dlq,omitempty"`          // 死信队列Topic
+	SeckillRetry     string                 `protobuf:"bytes,4,opt,name=seckill_retry,json=seckillRetry,proto3" json:"seckill_retry,omitempty"`    // 重试队列Topic（延迟队列）
+	SeckillOrderPaid string                 `protobuf:"bytes,5,opt,name=seckill_order_paid,json=seckillOrderPaid,proto3" json:"seckill_order_paid,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *Kafka_Topics) Reset() {
 	*x = Kafka_Topics{}
-	mi := &file_conf_conf_proto_msgTypes[10]
+	mi := &file_conf_conf_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -745,7 +970,7 @@ func (x *Kafka_Topics) String() string {
 func (*Kafka_Topics) ProtoMessage() {}
 
 func (x *Kafka_Topics) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_conf_proto_msgTypes[10]
+	mi := &file_conf_conf_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -789,16 +1014,25 @@ func (x *Kafka_Topics) GetSeckillRetry() string {
 	return ""
 }
 
+func (x *Kafka_Topics) GetSeckillOrderPaid() string {
+	if x != nil {
+		return x.SeckillOrderPaid
+	}
+	return ""
+}
+
 var File_conf_conf_proto protoreflect.FileDescriptor
 
 const file_conf_conf_proto_rawDesc = "" +
 	"\n" +
 	"\x0fconf/conf.proto\x12\n" +
-	"kratos.api\x1a\x1egoogle/protobuf/duration.proto\"\x86\x01\n" +
+	"kratos.api\x1a\x1egoogle/protobuf/duration.proto\"\xf0\x01\n" +
 	"\tBootstrap\x12*\n" +
 	"\x06server\x18\x01 \x01(\v2\x12.kratos.api.ServerR\x06server\x12$\n" +
 	"\x04data\x18\x02 \x01(\v2\x10.kratos.api.DataR\x04data\x12'\n" +
-	"\x05kafka\x18\x03 \x01(\v2\x11.kratos.api.KafkaR\x05kafka\"\xb8\x02\n" +
+	"\x05kafka\x18\x03 \x01(\v2\x11.kratos.api.KafkaR\x05kafka\x12?\n" +
+	"\robservability\x18\x04 \x01(\v2\x19.kratos.api.ObservabilityR\robservability\x12'\n" +
+	"\x05nacos\x18\x05 \x01(\v2\x11.kratos.api.NacosR\x05nacos\"\xb8\x02\n" +
 	"\x06Server\x12+\n" +
 	"\x04http\x18\x01 \x01(\v2\x17.kratos.api.Server.HTTPR\x04http\x12+\n" +
 	"\x04grpc\x18\x02 \x01(\v2\x17.kratos.api.Server.GRPCR\x04grpc\x1ai\n" +
@@ -825,7 +1059,7 @@ const file_conf_conf_proto_rawDesc = "" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x0e\n" +
 	"\x02db\x18\x03 \x01(\x05R\x02db\x12<\n" +
 	"\fread_timeout\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\vreadTimeout\x12>\n" +
-	"\rwrite_timeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\fwriteTimeout\"\xc5\b\n" +
+	"\rwrite_timeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\fwriteTimeout\"\xc6\t\n" +
 	"\x05Kafka\x12\x18\n" +
 	"\abrokers\x18\x01 \x03(\tR\abrokers\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12%\n" +
@@ -833,27 +1067,47 @@ const file_conf_conf_proto_rawDesc = "" +
 	"\tclient_id\x18\x04 \x01(\tR\bclientId\x126\n" +
 	"\bproducer\x18\x05 \x01(\v2\x1a.kratos.api.Kafka.ProducerR\bproducer\x126\n" +
 	"\bconsumer\x18\x06 \x01(\v2\x1a.kratos.api.Kafka.ConsumerR\bconsumer\x120\n" +
-	"\x06topics\x18\a \x01(\v2\x18.kratos.api.Kafka.TopicsR\x06topics\x1a\x8f\x02\n" +
+	"\x06topics\x18\a \x01(\v2\x18.kratos.api.Kafka.TopicsR\x06topics\x1a\xe2\x02\n" +
 	"\bProducer\x12*\n" +
 	"\x11max_message_bytes\x18\x01 \x01(\x05R\x0fmaxMessageBytes\x12#\n" +
 	"\rrequired_acks\x18\x02 \x01(\x05R\frequiredAcks\x12 \n" +
 	"\vcompression\x18\x03 \x01(\tR\vcompression\x12\x1b\n" +
 	"\tretry_max\x18\x04 \x01(\x05R\bretryMax\x12>\n" +
 	"\rretry_backoff\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\fretryBackoff\x123\n" +
-	"\atimeout\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x1a\xf2\x02\n" +
+	"\atimeout\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12-\n" +
+	"\x12enable_idempotence\x18\a \x01(\bR\x11enableIdempotence\x12\"\n" +
+	"\rmax_in_flight\x18\b \x01(\x05R\vmaxInFlight\x1a\xf2\x02\n" +
 	"\bConsumer\x12B\n" +
 	"\x0fsession_timeout\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\x0esessionTimeout\x12H\n" +
 	"\x12heartbeat_interval\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\x11heartbeatInterval\x12I\n" +
 	"\x13max_processing_time\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\x11maxProcessingTime\x12&\n" +
 	"\x0ffetch_min_bytes\x18\x04 \x01(\x05R\rfetchMinBytes\x12&\n" +
 	"\x0ffetch_max_bytes\x18\x05 \x01(\x05R\rfetchMaxBytes\x12=\n" +
-	"\rmax_wait_time\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\vmaxWaitTime\x1a\x9a\x01\n" +
+	"\rmax_wait_time\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\vmaxWaitTime\x1a\xc8\x01\n" +
 	"\x06Topics\x12#\n" +
 	"\rseckill_order\x18\x01 \x01(\tR\fseckillOrder\x12%\n" +
 	"\x0eseckill_result\x18\x02 \x01(\tR\rseckillResult\x12\x1f\n" +
 	"\vseckill_dlq\x18\x03 \x01(\tR\n" +
 	"seckillDlq\x12#\n" +
-	"\rseckill_retry\x18\x04 \x01(\tR\fseckillRetryB$Z\"seckill-service/internal/conf;confb\x06proto3"
+	"\rseckill_retry\x18\x04 \x01(\tR\fseckillRetry\x12,\n" +
+	"\x12seckill_order_paid\x18\x05 \x01(\tR\x10seckillOrderPaid\"\xf0\x01\n" +
+	"\rObservability\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\x12!\n" +
+	"\fservice_name\x18\x02 \x01(\tR\vserviceName\x12\x10\n" +
+	"\x03env\x18\x03 \x01(\tR\x03env\x12#\n" +
+	"\rotel_endpoint\x18\x04 \x01(\tR\fotelEndpoint\x12!\n" +
+	"\fsample_ratio\x18\x05 \x01(\x01R\vsampleRatio\x12%\n" +
+	"\x0eenable_metrics\x18\x06 \x01(\bR\renableMetrics\x12!\n" +
+	"\fmetrics_addr\x18\a \x01(\tR\vmetricsAddr\"\xdd\x01\n" +
+	"\x05Nacos\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x12\n" +
+	"\x04addr\x18\x02 \x01(\tR\x04addr\x12\x1c\n" +
+	"\tnamespace\x18\x03 \x01(\tR\tnamespace\x12\x14\n" +
+	"\x05group\x18\x04 \x01(\tR\x05group\x12\x17\n" +
+	"\adata_id\x18\x05 \x01(\tR\x06dataId\x12\x1a\n" +
+	"\busername\x18\x06 \x01(\tR\busername\x12\x1a\n" +
+	"\bpassword\x18\a \x01(\tR\bpassword\x12!\n" +
+	"\fservice_name\x18\b \x01(\tR\vserviceNameB$Z\"seckill-service/internal/conf;confb\x06proto3"
 
 var (
 	file_conf_conf_proto_rawDescOnce sync.Once
@@ -867,50 +1121,54 @@ func file_conf_conf_proto_rawDescGZIP() []byte {
 	return file_conf_conf_proto_rawDescData
 }
 
-var file_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_conf_conf_proto_goTypes = []any{
 	(*Bootstrap)(nil),           // 0: kratos.api.Bootstrap
 	(*Server)(nil),              // 1: kratos.api.Server
 	(*Data)(nil),                // 2: kratos.api.Data
 	(*Kafka)(nil),               // 3: kratos.api.Kafka
-	(*Server_HTTP)(nil),         // 4: kratos.api.Server.HTTP
-	(*Server_GRPC)(nil),         // 5: kratos.api.Server.GRPC
-	(*Data_Database)(nil),       // 6: kratos.api.Data.Database
-	(*Data_Redis)(nil),          // 7: kratos.api.Data.Redis
-	(*Kafka_Producer)(nil),      // 8: kratos.api.Kafka.Producer
-	(*Kafka_Consumer)(nil),      // 9: kratos.api.Kafka.Consumer
-	(*Kafka_Topics)(nil),        // 10: kratos.api.Kafka.Topics
-	(*durationpb.Duration)(nil), // 11: google.protobuf.Duration
+	(*Observability)(nil),       // 4: kratos.api.Observability
+	(*Nacos)(nil),               // 5: kratos.api.Nacos
+	(*Server_HTTP)(nil),         // 6: kratos.api.Server.HTTP
+	(*Server_GRPC)(nil),         // 7: kratos.api.Server.GRPC
+	(*Data_Database)(nil),       // 8: kratos.api.Data.Database
+	(*Data_Redis)(nil),          // 9: kratos.api.Data.Redis
+	(*Kafka_Producer)(nil),      // 10: kratos.api.Kafka.Producer
+	(*Kafka_Consumer)(nil),      // 11: kratos.api.Kafka.Consumer
+	(*Kafka_Topics)(nil),        // 12: kratos.api.Kafka.Topics
+	(*durationpb.Duration)(nil), // 13: google.protobuf.Duration
 }
 var file_conf_conf_proto_depIdxs = []int32{
 	1,  // 0: kratos.api.Bootstrap.server:type_name -> kratos.api.Server
 	2,  // 1: kratos.api.Bootstrap.data:type_name -> kratos.api.Data
 	3,  // 2: kratos.api.Bootstrap.kafka:type_name -> kratos.api.Kafka
-	4,  // 3: kratos.api.Server.http:type_name -> kratos.api.Server.HTTP
-	5,  // 4: kratos.api.Server.grpc:type_name -> kratos.api.Server.GRPC
-	6,  // 5: kratos.api.Data.user_db:type_name -> kratos.api.Data.Database
-	6,  // 6: kratos.api.Data.product_db:type_name -> kratos.api.Data.Database
-	6,  // 7: kratos.api.Data.core_db:type_name -> kratos.api.Data.Database
-	6,  // 8: kratos.api.Data.pay_db:type_name -> kratos.api.Data.Database
-	7,  // 9: kratos.api.Data.redis:type_name -> kratos.api.Data.Redis
-	8,  // 10: kratos.api.Kafka.producer:type_name -> kratos.api.Kafka.Producer
-	9,  // 11: kratos.api.Kafka.consumer:type_name -> kratos.api.Kafka.Consumer
-	10, // 12: kratos.api.Kafka.topics:type_name -> kratos.api.Kafka.Topics
-	11, // 13: kratos.api.Server.HTTP.timeout:type_name -> google.protobuf.Duration
-	11, // 14: kratos.api.Server.GRPC.timeout:type_name -> google.protobuf.Duration
-	11, // 15: kratos.api.Data.Redis.read_timeout:type_name -> google.protobuf.Duration
-	11, // 16: kratos.api.Data.Redis.write_timeout:type_name -> google.protobuf.Duration
-	11, // 17: kratos.api.Kafka.Producer.retry_backoff:type_name -> google.protobuf.Duration
-	11, // 18: kratos.api.Kafka.Producer.timeout:type_name -> google.protobuf.Duration
-	11, // 19: kratos.api.Kafka.Consumer.session_timeout:type_name -> google.protobuf.Duration
-	11, // 20: kratos.api.Kafka.Consumer.heartbeat_interval:type_name -> google.protobuf.Duration
-	11, // 21: kratos.api.Kafka.Consumer.max_processing_time:type_name -> google.protobuf.Duration
-	11, // 22: kratos.api.Kafka.Consumer.max_wait_time:type_name -> google.protobuf.Duration
-	23, // [23:23] is the sub-list for method output_type
-	23, // [23:23] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	23, // [23:23] is the sub-list for extension extendee
-	0,  // [0:23] is the sub-list for field type_name
+	4,  // 3: kratos.api.Bootstrap.observability:type_name -> kratos.api.Observability
+	5,  // 4: kratos.api.Bootstrap.nacos:type_name -> kratos.api.Nacos
+	6,  // 5: kratos.api.Server.http:type_name -> kratos.api.Server.HTTP
+	7,  // 6: kratos.api.Server.grpc:type_name -> kratos.api.Server.GRPC
+	8,  // 7: kratos.api.Data.user_db:type_name -> kratos.api.Data.Database
+	8,  // 8: kratos.api.Data.product_db:type_name -> kratos.api.Data.Database
+	8,  // 9: kratos.api.Data.core_db:type_name -> kratos.api.Data.Database
+	8,  // 10: kratos.api.Data.pay_db:type_name -> kratos.api.Data.Database
+	9,  // 11: kratos.api.Data.redis:type_name -> kratos.api.Data.Redis
+	10, // 12: kratos.api.Kafka.producer:type_name -> kratos.api.Kafka.Producer
+	11, // 13: kratos.api.Kafka.consumer:type_name -> kratos.api.Kafka.Consumer
+	12, // 14: kratos.api.Kafka.topics:type_name -> kratos.api.Kafka.Topics
+	13, // 15: kratos.api.Server.HTTP.timeout:type_name -> google.protobuf.Duration
+	13, // 16: kratos.api.Server.GRPC.timeout:type_name -> google.protobuf.Duration
+	13, // 17: kratos.api.Data.Redis.read_timeout:type_name -> google.protobuf.Duration
+	13, // 18: kratos.api.Data.Redis.write_timeout:type_name -> google.protobuf.Duration
+	13, // 19: kratos.api.Kafka.Producer.retry_backoff:type_name -> google.protobuf.Duration
+	13, // 20: kratos.api.Kafka.Producer.timeout:type_name -> google.protobuf.Duration
+	13, // 21: kratos.api.Kafka.Consumer.session_timeout:type_name -> google.protobuf.Duration
+	13, // 22: kratos.api.Kafka.Consumer.heartbeat_interval:type_name -> google.protobuf.Duration
+	13, // 23: kratos.api.Kafka.Consumer.max_processing_time:type_name -> google.protobuf.Duration
+	13, // 24: kratos.api.Kafka.Consumer.max_wait_time:type_name -> google.protobuf.Duration
+	25, // [25:25] is the sub-list for method output_type
+	25, // [25:25] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_conf_conf_proto_init() }
@@ -924,7 +1182,7 @@ func file_conf_conf_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conf_conf_proto_rawDesc), len(file_conf_conf_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

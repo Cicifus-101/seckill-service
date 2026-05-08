@@ -36,6 +36,11 @@ var (
 	ErrOrderStatusIncorrect = errors.New("订单状态不正确")
 	ErrOrderTimeout         = errors.New("订单已超时，请重新下单")
 	ErrOrderExists          = errors.New("订单已存在")
+	ErrPaymentExists        = errors.New("支付流水已存在")
+	ErrPayInfoNotFound      = errors.New("支付单不存在")
+	ErrPayAmountMismatch    = errors.New("支付金额不一致")
+	ErrInvalidPaySign       = errors.New("支付回调签名无效")
+	ErrDeadLetterNotFound   = errors.New("死信队列不存在")
 )
 
 // 用户相关错误

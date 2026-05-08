@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"seckill-service/internal/data"
+	"seckill-service/internal/observability"
 	"strings"
 	"time"
 
@@ -106,6 +107,7 @@ func (r *mysqlRepo) ListSeckillProducts(ctx context.Context, activityID uint64, 
 		result = append(result, &biz.SeckillProduct{
 			SkuID:          s.ID,
 			ProductID:      s.ProductID,
+			ActivityID:     s.ActivityID,
 			Name:           "",
 			MainImage:      "",
 			SeckillPrice:   s.SeckillPrice,
@@ -258,7 +260,16 @@ func (r *mysqlRepo) CreatePayInfo(ctx context.Context, payInfo *biz.PayInfo) err
 		modelPayInfo.PayTime = payInfo.PayTime
 	}
 
-	return q.PayInfo.WithContext(ctx).Create(modelPayInfo)
+	err := q.PayInfo.WithContext(ctx).Create(modelPayInfo)
+	if err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) ||
+			(err.Error() != "" && strings.Contains(err.Error(), "Duplicate entry")) {
+			return biz.ErrPaymentExists
+		}
+		return err
+	}
+
+	return nil
 }
 
 // LockStock 锁定库存（使用SELECT FOR UPDATE）
@@ -293,7 +304,6 @@ func (r *mysqlRepo) DecreaseStock(ctx context.Context, skuID uint64, quantity ui
 	info, err := q.SeckillSku.WithContext(ctx).
 		Where(
 			q.SeckillSku.ID.Eq(skuID),
-			q.SeckillSku.Version.Eq(version),
 			q.SeckillSku.AvailableStock.Gte(quantity),
 		).
 		UpdateSimple(
@@ -306,7 +316,7 @@ func (r *mysqlRepo) DecreaseStock(ctx context.Context, skuID uint64, quantity ui
 	}
 
 	if info.RowsAffected == 0 {
-		return biz.ErrStockUpdateConflict
+		return biz.ErrInsufficientStock
 	}
 
 	return nil
@@ -333,14 +343,13 @@ func (r *mysqlRepo) RestoreStock(ctx context.Context, skuID uint64, quantity uin
 }
 
 // CheckUserBuyRecord 检查用户购买记录
-func (r *mysqlRepo) CheckUserBuyRecord(ctx context.Context, userID, activityID, productID uint64) (*biz.UserBuyRecord, error) {
+func (r *mysqlRepo) CheckUserBuyRecord(ctx context.Context, userID, activityID uint64) (*biz.UserBuyRecord, error) {
 	q := r.data.GetCoreQuery(ctx)
 
 	order, err := q.SeckillOrder.WithContext(ctx).
 		Where(
 			q.SeckillOrder.UserID.Eq(userID),
 			q.SeckillOrder.ActivityID.Eq(activityID),
-			q.SeckillOrder.ProductID.Eq(productID),
 			q.SeckillOrder.Status.In(0, 1),
 		).
 		First()
@@ -355,9 +364,14 @@ func (r *mysqlRepo) CheckUserBuyRecord(ctx context.Context, userID, activityID, 
 		return nil, err
 	}
 
+	quantity := int64(0)
+	if order.Quantity != nil {
+		quantity = int64(*order.Quantity)
+	}
+
 	return &biz.UserBuyRecord{
 		HasBought: true,
-		Quantity:  int64(*order.Quantity),
+		Quantity:  quantity,
 	}, nil
 }
 
@@ -467,24 +481,40 @@ func (r *mysqlRepo) RestoreCoupon(ctx context.Context, couponID uint64) error {
 }
 
 // CreateOrder 创建订单
-func (r *mysqlRepo) CreateOrder(ctx context.Context, order *biz.Order) (string, error) {
+func (r *mysqlRepo) CreateOrder(ctx context.Context, order *biz.Order) (orderNo string, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "repo.mysql.CreateOrder")
+	defer func() {
+		observability.Finish(span, err)
+		observability.ObserveOperation("mysql", "CreateOrder", func() string {
+			if err != nil {
+				return "fail"
+			}
+			return "success"
+		}(), start)
+	}()
+
 	q := r.data.GetCoreQuery(ctx)
 
-	orderNo := order.OrderNo
+	orderNo = order.OrderNo
 	quantity := uint32(order.Quantity)
 
 	modelOrder := &coreModel.SeckillOrder{
-		OrderNo:      orderNo,
-		UserID:       order.UserID,
-		ActivityID:   order.ActivityID,
-		ProductID:    order.ProductID,
-		SkuID:        order.SkuID,
-		ProductName:  order.ProductName,
-		ProductImage: order.ProductImage,
-		SeckillPrice: order.SeckillPrice,
-		Quantity:     &quantity,
-		OrderAmount:  order.OrderAmount,
-		Status:       0,
+		OrderNo:        orderNo,
+		RequestID:      order.RequestID,
+		UserID:         order.UserID,
+		ActivityID:     order.ActivityID,
+		ProductID:      order.ProductID,
+		SkuID:          order.SkuID,
+		ProductName:    order.ProductName,
+		ProductImage:   order.ProductImage,
+		SeckillPrice:   order.SeckillPrice,
+		Quantity:       &quantity,
+		OrderAmount:    order.OrderAmount,
+		CouponID:       nil,
+		CouponDiscount: order.CouponDiscount,
+		FinalAmount:    &order.FinalAmount,
+		Status:         0,
 	}
 
 	if order.CouponID > 0 {
@@ -496,7 +526,7 @@ func (r *mysqlRepo) CreateOrder(ctx context.Context, order *biz.Order) (string, 
 		modelOrder.AddressID = &addressID
 	}
 
-	err := q.SeckillOrder.WithContext(ctx).Create(modelOrder)
+	err = q.SeckillOrder.WithContext(ctx).Create(modelOrder)
 	if err != nil {
 		// 检查唯一索引冲突
 		if errors.Is(err, gorm.ErrDuplicatedKey) ||
@@ -510,7 +540,19 @@ func (r *mysqlRepo) CreateOrder(ctx context.Context, order *biz.Order) (string, 
 }
 
 // CreateOrderShipping 创建收货信息快照
-func (r *mysqlRepo) CreateOrderShipping(ctx context.Context, orderNo string, address *biz.Address) error {
+func (r *mysqlRepo) CreateOrderShipping(ctx context.Context, orderNo string, address *biz.Address) (err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "repo.mysql.CreateOrderShipping")
+	defer func() {
+		observability.Finish(span, err)
+		observability.ObserveOperation("mysql", "CreateOrderShipping", func() string {
+			if err != nil {
+				return "fail"
+			}
+			return "success"
+		}(), start)
+	}()
+
 	q := r.data.GetCoreQuery(ctx)
 
 	shipping := &coreModel.OrderShipping{
@@ -527,7 +569,19 @@ func (r *mysqlRepo) CreateOrderShipping(ctx context.Context, orderNo string, add
 }
 
 // GetOrder 获取订单信息
-func (r *mysqlRepo) GetOrder(ctx context.Context, orderNo string) (*biz.OrderInfo, error) {
+func (r *mysqlRepo) GetOrder(ctx context.Context, orderNo string) (orderInfo *biz.OrderInfo, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "repo.mysql.GetOrder")
+	defer func() {
+		observability.Finish(span, err)
+		observability.ObserveOperation("mysql", "GetOrder", func() string {
+			if err != nil {
+				return "fail"
+			}
+			return "success"
+		}(), start)
+	}()
+
 	q := r.data.GetCoreQuery(ctx)
 
 	order, err := q.SeckillOrder.WithContext(ctx).
@@ -546,23 +600,46 @@ func (r *mysqlRepo) GetOrder(ctx context.Context, orderNo string) (*biz.OrderInf
 		Where(q.OrderShipping.OrderNo.Eq(orderNo)).
 		First()
 
-	orderInfo := &biz.OrderInfo{
-		OrderNo:      order.OrderNo,
-		UserID:       order.UserID,
-		ActivityID:   order.ActivityID,
-		ProductID:    order.ProductID,
-		SkuID:        order.SkuID,
-		ProductName:  order.ProductName,
-		ProductImage: order.ProductImage,
-		SeckillPrice: order.SeckillPrice,
-		Quantity:     int64(*order.Quantity),
-		OrderAmount:  order.OrderAmount,
-		Status:       int32(order.Status),
-		CreateTime:   order.CreateTime.Format("2006-01-02 15:04:05"),
+	quantity := int64(0)
+	if order.Quantity != nil {
+		quantity = int64(*order.Quantity)
+	}
+
+	couponID := uint64(0)
+	if order.CouponID != nil {
+		couponID = *order.CouponID
+	}
+
+	finalAmount := order.OrderAmount
+	if order.FinalAmount != nil {
+		finalAmount = *order.FinalAmount
+	}
+
+	createTime := ""
+	if order.CreateTime != nil {
+		createTime = order.CreateTime.Format("2006-01-02 15:04:05")
+	}
+
+	orderInfo = &biz.OrderInfo{
+		OrderNo:        order.OrderNo,
+		UserID:         order.UserID,
+		ActivityID:     order.ActivityID,
+		ProductID:      order.ProductID,
+		SkuID:          order.SkuID,
+		ProductName:    order.ProductName,
+		ProductImage:   order.ProductImage,
+		SeckillPrice:   order.SeckillPrice,
+		Quantity:       quantity,
+		OrderAmount:    order.OrderAmount,
+		CouponID:       couponID,
+		CouponDiscount: order.CouponDiscount,
+		FinalAmount:    finalAmount,
+		Status:         int32(order.Status),
+		CreateTime:     createTime,
 	}
 
 	// 支付倒计时
-	if order.Status == 0 {
+	if order.Status == 0 && order.CreateTime != nil {
 		expireTime := order.CreateTime.Add(15 * time.Minute)
 		remaining := int64(time.Until(expireTime).Seconds())
 		if remaining > 0 {
@@ -585,8 +662,74 @@ func (r *mysqlRepo) GetOrder(ctx context.Context, orderNo string) (*biz.OrderInf
 	return orderInfo, nil
 }
 
+// GetOrderByRequestID 前端轮询查询订单结果
+func (r *mysqlRepo) GetOrderByRequestID(ctx context.Context, requestID string) (*biz.OrderInfo, error) {
+	q := r.data.GetCoreQuery(ctx)
+
+	order, err := q.SeckillOrder.WithContext(ctx).
+		Where(q.SeckillOrder.RequestID.Eq(requestID)).
+		First()
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, biz.ErrOrderNotFound
+		}
+		return nil, err
+	}
+
+	quantity := int64(0)
+	if order.Quantity != nil {
+		quantity = int64(*order.Quantity)
+	}
+
+	couponID := uint64(0)
+	if order.CouponID != nil {
+		couponID = *order.CouponID
+	}
+
+	createTime := ""
+	if order.CreateTime != nil {
+		createTime = order.CreateTime.Format("2006-01-02 15:04:05")
+	}
+
+	return &biz.OrderInfo{
+		OrderNo:        order.OrderNo,
+		UserID:         order.UserID,
+		ActivityID:     order.ActivityID,
+		ProductID:      order.ProductID,
+		SkuID:          order.SkuID,
+		ProductName:    order.ProductName,
+		ProductImage:   order.ProductImage,
+		SeckillPrice:   order.SeckillPrice,
+		Quantity:       quantity,
+		OrderAmount:    order.OrderAmount,
+		CouponID:       couponID,
+		CouponDiscount: order.CouponDiscount,
+		FinalAmount: func() uint64 {
+			if order.FinalAmount != nil {
+				return *order.FinalAmount
+			}
+			return order.OrderAmount
+		}(),
+		Status:     int32(order.Status),
+		CreateTime: createTime,
+	}, nil
+}
+
 // GetOrderForUpdate 获取订单信息（带行锁）
-func (r *mysqlRepo) GetOrderForUpdate(ctx context.Context, orderNo string) (*biz.OrderInfo, error) {
+func (r *mysqlRepo) GetOrderForUpdate(ctx context.Context, orderNo string) (orderInfo *biz.OrderInfo, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "repo.mysql.GetOrderForUpdate")
+	defer func() {
+		observability.Finish(span, err)
+		observability.ObserveOperation("mysql", "GetOrderForUpdate", func() string {
+			if err != nil {
+				return "fail"
+			}
+			return "success"
+		}(), start)
+	}()
+
 	q := r.data.GetCoreQuery(ctx)
 
 	order, err := q.SeckillOrder.WithContext(ctx).
@@ -600,6 +743,25 @@ func (r *mysqlRepo) GetOrderForUpdate(ctx context.Context, orderNo string) (*biz
 		}
 		return nil, err
 	}
+	quantity := int64(0)
+	if order.Quantity != nil {
+		quantity = int64(*order.Quantity)
+	}
+
+	couponID := uint64(0)
+	if order.CouponID != nil {
+		couponID = *order.CouponID
+	}
+
+	finalAmount := order.OrderAmount
+	if order.FinalAmount != nil {
+		finalAmount = *order.FinalAmount
+	}
+
+	createTime := ""
+	if order.CreateTime != nil {
+		createTime = order.CreateTime.Format("2006-01-02 15:04:05")
+	}
 
 	return &biz.OrderInfo{
 		OrderNo:      order.OrderNo,
@@ -610,41 +772,69 @@ func (r *mysqlRepo) GetOrderForUpdate(ctx context.Context, orderNo string) (*biz
 		ProductName:  order.ProductName,
 		ProductImage: order.ProductImage,
 		SeckillPrice: order.SeckillPrice,
-		Quantity:     int64(*order.Quantity),
+		Quantity:     quantity,
 		OrderAmount:  order.OrderAmount,
 		Status:       int32(order.Status),
-		CreateTime:   order.CreateTime.Format("2006-01-02 15:04:05"),
-		CouponID: func() uint64 {
-			if order.CouponID != nil {
-				return *order.CouponID
-			}
-			return 0
-		}(),
-		FinalAmount: order.OrderAmount,
+		CreateTime:   createTime,
+		CouponID:     couponID,
+		FinalAmount:  finalAmount,
 	}, nil
 }
 
 // UpdateOrderStatus 更新订单状态
-func (r *mysqlRepo) UpdateOrderStatus(ctx context.Context, orderNo string, status int32) error {
+func (r *mysqlRepo) UpdateOrderStatus(ctx context.Context, orderNo string, fromStatus int32, toStatus int32) (err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "repo.mysql.UpdateOrderStatus")
+	defer func() {
+		observability.Finish(span, err)
+		observability.ObserveOperation("mysql", "UpdateOrderStatus", func() string {
+			if err != nil {
+				return "fail"
+			}
+			return "success"
+		}(), start)
+	}()
+
 	q := r.data.GetCoreQuery(ctx)
 
 	updates := map[string]interface{}{
-		"status": status,
+		"status": toStatus,
 	}
 
-	if status == 1 {
+	if toStatus == biz.OrderStatusPaid {
 		updates["pay_time"] = time.Now()
 	}
 
-	_, err := q.SeckillOrder.WithContext(ctx).
-		Where(q.SeckillOrder.OrderNo.Eq(orderNo)).
+	info, err := q.SeckillOrder.WithContext(ctx).
+		Where(q.SeckillOrder.OrderNo.Eq(orderNo),
+			q.SeckillOrder.Status.Eq(uint32(fromStatus))).
 		Updates(updates)
 
-	return err
+	if err != nil {
+		return err
+	}
+
+	if info.RowsAffected == 0 {
+		return biz.ErrOrderStatusIncorrect
+	}
+
+	return nil
 }
 
 // GetPendingOrders 获取超时待支付订单
-func (r *mysqlRepo) GetPendingOrders(ctx context.Context, timeoutMinutes int) ([]*biz.OrderInfo, error) {
+func (r *mysqlRepo) GetPendingOrders(ctx context.Context, timeoutMinutes int) (orderInfos []*biz.OrderInfo, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "repo.mysql.CreateOrder")
+	defer func() {
+		observability.Finish(span, err)
+		observability.ObserveOperation("mysql", "CreateOrder", func() string {
+			if err != nil {
+				return "fail"
+			}
+			return "success"
+		}(), start)
+	}()
+
 	q := r.data.GetCoreQuery(ctx)
 	timeoutTime := time.Now().Add(-time.Duration(timeoutMinutes) * time.Minute)
 
@@ -661,22 +851,285 @@ func (r *mysqlRepo) GetPendingOrders(ctx context.Context, timeoutMinutes int) ([
 
 	result := make([]*biz.OrderInfo, 0, len(orders))
 	for _, order := range orders {
+		quantity := int64(0)
+		if order.Quantity != nil {
+			quantity = int64(*order.Quantity)
+		}
+
+		couponID := uint64(0)
+		if order.CouponID != nil {
+			couponID = *order.CouponID
+		}
+
+		createTime := ""
+		if order.CreateTime != nil {
+			createTime = order.CreateTime.Format("2006-01-02 15:04:05")
+		}
+
 		result = append(result, &biz.OrderInfo{
 			OrderNo:     order.OrderNo,
 			UserID:      order.UserID,
 			SkuID:       order.SkuID,
-			Quantity:    int64(*order.Quantity),
+			Quantity:    quantity,
 			OrderAmount: order.OrderAmount,
 			Status:      int32(order.Status),
-			CreateTime:  order.CreateTime.Format("2006-01-02 15:04:05"),
-			CouponID: func() uint64 {
-				if order.CouponID != nil {
-					return *order.CouponID
-				}
-				return 0
-			}(),
+			CreateTime:  createTime,
+			CouponID:    couponID,
 		})
 	}
 
 	return result, nil
+}
+
+func (r *mysqlRepo) GetPayInfoByPlatformNumber(ctx context.Context, platformNumber string) (res *biz.PayInfo, err error) {
+	q := r.data.GetPayQuery(ctx)
+	payInfo, err := q.PayInfo.WithContext(ctx).
+		Where(q.PayInfo.PlatformNumber.Eq(platformNumber)).
+		First()
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, biz.ErrPayInfoNotFound
+		}
+		return nil, err
+	}
+
+	return &biz.PayInfo{
+		OrderNo:        payInfo.OrderNo,
+		UserID:         payInfo.UserID,
+		PayPlatform:    payInfo.PayPlatform,
+		PlatformNumber: payInfo.PlatformNumber,
+		PlatformStatus: payInfo.PlatformStatus,
+		PayAmount:      payInfo.PayAmount,
+		PayTime:        payInfo.PayTime,
+	}, nil
+}
+
+func (r *mysqlRepo) GetPayInfoByOrderNo(ctx context.Context, orderNo string) (res *biz.PayInfo, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "repo.mysql.GetPayInfoByOrderNo")
+	defer func() {
+		observability.Finish(span, err)
+		observability.ObserveOperation("mysql", "GetPayInfoByOrderNo", func() string {
+			if err != nil {
+				return "fail"
+			}
+			return "success"
+		}(), start)
+	}()
+
+	q := r.data.GetPayQuery(ctx)
+
+	payInfo, err := q.PayInfo.WithContext(ctx).
+		Where(q.PayInfo.OrderNo.Eq(orderNo)).
+		First()
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, biz.ErrPayInfoNotFound
+		}
+		return nil, err
+	}
+
+	return &biz.PayInfo{
+		OrderNo:        payInfo.OrderNo,
+		UserID:         payInfo.UserID,
+		PayPlatform:    payInfo.PayPlatform,
+		PlatformNumber: payInfo.PlatformNumber,
+		PlatformStatus: payInfo.PlatformStatus,
+		PayAmount:      payInfo.PayAmount,
+		PayTime:        payInfo.PayTime,
+	}, nil
+}
+
+func (r *mysqlRepo) UpdatePayInfoStatus(ctx context.Context, platformNumber string, status string, payTime *time.Time) (err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "repo.mysql.UpdatePayInfoStatus")
+	defer func() {
+		observability.Finish(span, err)
+		observability.ObserveOperation("mysql", "UpdatePayInfoStatus", func() string {
+			if err != nil {
+				return "fail"
+			}
+			return "success"
+		}(), start)
+	}()
+
+	q := r.data.GetPayQuery(ctx)
+
+	updates := map[string]interface{}{
+		"platform_status": status,
+	}
+
+	if payTime != nil {
+		updates["pay_time"] = payTime
+	}
+
+	info, err := q.PayInfo.WithContext(ctx).
+		Where(q.PayInfo.PlatformNumber.Eq(platformNumber)).
+		Updates(updates)
+
+	if err != nil {
+		return err
+	}
+
+	if info.RowsAffected == 0 {
+		return biz.ErrPayInfoNotFound
+	}
+
+	return nil
+}
+
+func (r *mysqlRepo) CreateDeadLetterMessage(ctx context.Context, msg *biz.DeadLetterMessage) (err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "repo.mysql.CreateDeadLetterMessage")
+	defer func() {
+		observability.Finish(span, err)
+		observability.ObserveOperation("mysql", "CreateDeadLetterMessage", func() string {
+			if err != nil {
+				return "fail"
+			}
+			return "success"
+		}(), start)
+	}()
+
+	q := r.data.GetPayQuery(ctx)
+
+	model := &payModel.MqDeadLetterMessage{
+		EventID:      msg.EventID,
+		Topic:        msg.Topic,
+		PartitionID:  msg.Partition,
+		OffsetID:     msg.Offset,
+		OrderNo:      msg.OrderNo,
+		RequestID:    msg.RequestID,
+		TraceID:      msg.TraceID,
+		RetryCount:   int32(msg.RetryCount),
+		ErrorMessage: msg.ErrorMessage,
+		RawPayload:   msg.RawPayload,
+		Status:       &msg.Status,
+	}
+
+	err = q.MqDeadLetterMessage.WithContext(ctx).Create(model)
+	if err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) ||
+			(err.Error() != "" && strings.Contains(err.Error(), "Duplicate entry")) {
+			return nil
+		}
+		return err
+	}
+
+	return nil
+}
+
+func (r *mysqlRepo) GetDeadLetterMessageByEventID(ctx context.Context, eventID string) (*biz.DeadLetterMessage, error) {
+	q := r.data.GetPayQuery(ctx)
+
+	row, err := q.MqDeadLetterMessage.WithContext(ctx).
+		Where(q.MqDeadLetterMessage.EventID.Eq(eventID)).
+		First()
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, biz.ErrDeadLetterNotFound
+		}
+		return nil, err
+	}
+	status := ""
+	if row.Status != nil {
+		status = *row.Status
+	}
+
+	var createTime time.Time
+	if row.CreateTime != nil {
+		createTime = *row.CreateTime
+	}
+
+	var updateTime time.Time
+	if row.UpdateTime != nil {
+		updateTime = *row.UpdateTime
+	}
+	return &biz.DeadLetterMessage{
+		ID:           row.ID,
+		EventID:      row.EventID,
+		Topic:        row.Topic,
+		Partition:    row.PartitionID,
+		Offset:       row.OffsetID,
+		OrderNo:      row.OrderNo,
+		RequestID:    row.RequestID,
+		TraceID:      row.TraceID,
+		RetryCount:   int(row.RetryCount),
+		ErrorMessage: row.ErrorMessage,
+		RawPayload:   row.RawPayload,
+		Status:       status,
+		CreateTime:   createTime,
+		UpdateTime:   updateTime,
+	}, nil
+}
+
+func (r *mysqlRepo) ListDeadLetterMessages(ctx context.Context, status string, limit int) ([]*biz.DeadLetterMessage, error) {
+	q := r.data.GetPayQuery(ctx)
+
+	query := q.MqDeadLetterMessage.WithContext(ctx).Order(q.MqDeadLetterMessage.ID.Desc())
+	if status != "" {
+		query = query.Where(q.MqDeadLetterMessage.Status.Eq(status))
+	}
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+
+	rows, err := query.Find()
+	if err != nil {
+		return nil, err
+	}
+
+	res := make([]*biz.DeadLetterMessage, 0, len(rows))
+	for _, row := range rows {
+		status := ""
+		if row.Status != nil {
+			status = *row.Status
+		}
+
+		var createTime time.Time
+		if row.CreateTime != nil {
+			createTime = *row.CreateTime
+		}
+
+		var updateTime time.Time
+		if row.UpdateTime != nil {
+			updateTime = *row.UpdateTime
+		}
+
+		res = append(res, &biz.DeadLetterMessage{
+			ID:           row.ID,
+			EventID:      row.EventID,
+			Topic:        row.Topic,
+			Partition:    row.PartitionID,
+			Offset:       row.OffsetID,
+			OrderNo:      row.OrderNo,
+			RequestID:    row.RequestID,
+			TraceID:      row.TraceID,
+			RetryCount:   int(row.RetryCount),
+			ErrorMessage: row.ErrorMessage,
+			RawPayload:   row.RawPayload,
+			Status:       status,
+			CreateTime:   createTime,
+			UpdateTime:   updateTime,
+		})
+	}
+
+	return res, nil
+}
+
+func (r *mysqlRepo) MarkDeadLetterReplayed(ctx context.Context, eventID string) error {
+	q := r.data.GetPayQuery(ctx)
+
+	info, err := q.MqDeadLetterMessage.WithContext(ctx).
+		Where(q.MqDeadLetterMessage.EventID.Eq(eventID)).
+		UpdateSimple(q.MqDeadLetterMessage.Status.Value("REPLAYED"))
+	if err != nil {
+		return err
+	}
+	if info.RowsAffected == 0 {
+		return biz.ErrDeadLetterNotFound
+	}
+	return nil
 }

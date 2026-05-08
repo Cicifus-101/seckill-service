@@ -3,6 +3,7 @@ package server
 import (
 	v1 "seckill-service/api/seckill/v1"
 	"seckill-service/internal/conf"
+	"seckill-service/internal/observability"
 	"seckill-service/internal/service"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -15,6 +16,8 @@ func NewHTTPServer(c *conf.Server, seckill *service.SeckillService, logger log.L
 	var opts = []http.ServerOption{
 		http.Middleware(
 			recovery.Recovery(),
+			observability.TraceMiddleware("http"),
+			observability.MetricsMiddleware("http"),
 		),
 	}
 	if c.Http.Network != "" {

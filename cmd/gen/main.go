@@ -92,7 +92,7 @@ func main() {
 		{
 			Name:     "pay",
 			Source:   bc.Data.PayDb.Source,
-			Tables:   []string{"pay_info"},
+			Tables:   []string{"pay_info", "mq_dead_letter_message", "message_outbox"},
 			OutPath:  filepath.Join(baseDir, "pay", "query"),
 			ModelPkg: filepath.Join(baseDir, "pay", "model"),
 		},

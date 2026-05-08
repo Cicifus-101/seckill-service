@@ -9,6 +9,8 @@ message Bootstrap {
   Server server = 1;
   Data data = 2;
   Kafka kafka = 3;
+  Observability  observability=4;
+  Nacos nacos=5;
 }
 
 message Server {
@@ -59,6 +61,8 @@ message Kafka {
     int32 retry_max = 4;
     google.protobuf.Duration retry_backoff = 5;
     google.protobuf.Duration timeout = 6;
+    bool enable_idempotence = 7;  // 是否启用幂等性
+    int32 max_in_flight = 8;   // 最大在途请求数
   }
   Producer producer = 5;
 
@@ -78,6 +82,29 @@ message Kafka {
     string seckill_result = 2;  // 秒杀结果Topic
     string seckill_dlq = 3;  // 死信队列Topic
     string seckill_retry = 4;  // 重试队列Topic（延迟队列）
+    string seckill_order_paid = 5;
   }
   Topics topics = 7;
+}
+
+
+message Observability{
+  bool enabled=1;   //是否启用可观测性
+  string service_name = 2;
+  string env=3;
+  string otel_endpoint=4; // OpenTelemetry 收集器地址
+  double sample_ratio=5;  // 链路采样率
+  bool enable_metrics = 6; // 是否启用指标采集
+  string metrics_addr = 7; // Prometheus 指标暴露地址
+}
+
+message Nacos{
+  bool enabled = 1;
+  string addr = 2;
+  string namespace = 3;
+  string group = 4; // 配置分组
+  string data_id = 5; // 配置数据ID
+  string username = 6;
+  string password = 7;
+  string service_name = 8;
 }

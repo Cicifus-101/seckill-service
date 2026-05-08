@@ -1,0 +1,109 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis/redis-stack-server:7.2.0-v10
+    container_name: seckill-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "admin123", "--loadmodule", "/opt/redis-stack/lib/redisbloom.so"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "admin123", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.2
+    container_name: seckill-zookeeper
+    restart: unless-stopped
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.3.2
+    container_name: seckill-kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: seckill-zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://127.0.0.1:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.3.2
+    container_name: seckill-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-lc"]
+    command: >
+      "
+      kafka-topics --bootstrap-server seckill-kafka:9092 --create --if-not-exists --topic seckill.order --partitions 3 --replication-factor 1;
+      kafka-topics --bootstrap-server seckill-kafka:9092 --create --if-not-exists --topic seckill.order.retry --partitions 3 --replication-factor 1;
+      kafka-topics --bootstrap-server seckill-kafka:9092 --create --if-not-exists --topic seckill.order.dlq --partitions 3 --replication-factor 1;
+      kafka-topics --bootstrap-server seckill-kafka:9092 --create --if-not-exists --topic seckill.result --partitions 3 --replication-factor 1;
+      kafka-topics --bootstrap-server seckill-kafka:9092 --create --if-not-exists --topic seckill.order.paid --partitions 3 --replication-factor 1;
+      echo 'kafka topics ensured';
+      "
+    restart: "no"
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.58
+    container_name: seckill-jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.103.0
+    container_name: seckill-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./docker/otel-collector.yml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    depends_on:
+      - jaeger
+
+  prometheus:
+    image: prom/prometheus:v2.53.1
+    container_name: seckill-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+
+volumes:
+  redis_data:
+  kafka_data:
+  zookeeper_data:
+  prometheus_data:

@@ -2,6 +2,7 @@ package biz
 
 import (
 	"context"
+	"github.com/IBM/sarama"
 	"seckill-service/internal/mq"
 	"time"
 )
@@ -16,7 +17,7 @@ type SeckillRepo interface {
 	GetCurrentActivity(ctx context.Context) (*Activity, int64, error)
 
 	// 用户
-	CheckUserBuyRecord(ctx context.Context, userID, activityID, productID uint64) (*UserBuyRecord, error)
+	CheckUserBuyRecord(ctx context.Context, userID, activityID uint64) (*UserBuyRecord, error)
 	GetUserAddress(ctx context.Context, addressID uint64) (*Address, error)
 
 	// 库存相关
@@ -28,9 +29,15 @@ type SeckillRepo interface {
 	CreateOrder(ctx context.Context, order *Order) (string, error)
 	CreateOrderShipping(ctx context.Context, orderNo string, address *Address) error
 	GetOrder(ctx context.Context, orderNo string) (*OrderInfo, error)
+	GetOrderByRequestID(ctx context.Context, requestID string) (*OrderInfo, error)
 	GetOrderForUpdate(ctx context.Context, orderNo string) (*OrderInfo, error) // 带行锁
-	UpdateOrderStatus(ctx context.Context, orderNo string, status int32) error
+	UpdateOrderStatus(ctx context.Context, orderNo string, fromStatus, toStatus int32) error
 	GetPendingOrders(ctx context.Context, timeoutMinutes int) ([]*OrderInfo, error)
+
+	CreateDeadLetterMessage(ctx context.Context, msg *DeadLetterMessage) error
+	ListDeadLetterMessages(ctx context.Context, status string, limit int) ([]*DeadLetterMessage, error)
+	GetDeadLetterMessageByEventID(ctx context.Context, eventID string) (*DeadLetterMessage, error)
+	MarkDeadLetterReplayed(ctx context.Context, eventID string) error
 
 	// 支付相关
 	CreatePayInfo(ctx context.Context, payInfo *PayInfo) error
@@ -39,6 +46,11 @@ type SeckillRepo interface {
 	GetCoupon(ctx context.Context, couponID uint64) (*Coupon, error)
 	UseCoupon(ctx context.Context, couponID uint64, version uint32) error
 	RestoreCoupon(ctx context.Context, couponID uint64) error // 恢复优惠券库存
+
+	// 支付相关
+	GetPayInfoByPlatformNumber(ctx context.Context, platformNumber string) (*PayInfo, error)
+	GetPayInfoByOrderNo(ctx context.Context, orderNo string) (*PayInfo, error)
+	UpdatePayInfoStatus(ctx context.Context, platformNumber string, status string, payTime *time.Time) error
 }
 
 // CacheRepo 缓存接口(redis)
@@ -50,28 +62,41 @@ type CacheRepo interface {
 	GetProductDetail(ctx context.Context, productID, activityID uint64) (*SeckillProductDetail, error)
 	SetProductDetail(ctx context.Context, productID, activityID uint64, detail *SeckillProductDetail, ttl time.Duration) error
 
+	// 布隆过滤器
+	BloomAdd(ctx context.Context, activityID, productID uint64) error
+	BloomExists(ctx context.Context, activityID, productID uint64) (bool, error)
+
 	// 库存缓存
-	GetStock(ctx context.Context, skuID uint64) (int64, error)
-	SetStock(ctx context.Context, skuID uint64, stock int64) error
-	DeductStock(ctx context.Context, skuID, userID uint64, quantity int) (int, error)
-	RollbackStock(ctx context.Context, skuID uint64, quantity int) error // 下单失败、订单超时
+	GetStock(ctx context.Context, activityID, skuID uint64) (int64, error)
+	SetStock(ctx context.Context, activityID, skuID uint64, stock int64) error
+	DeductStock(ctx context.Context, activityID, skuID, userID uint64, quantity int) (int, error)
+	RollbackStock(ctx context.Context, activityID, skuID uint64, quantity int) error // 下单失败、订单超时
 
 	// 活动缓存
 	GetCurrentActivity(ctx context.Context) (*Activity, error)
 	SetCurrentActivity(ctx context.Context, activity *Activity, ttl time.Duration) error
 
 	// 用户购买记录
-	CheckUserBuy(ctx context.Context, skuID, userID uint64) (bool, error)
-	MarkUserBuy(ctx context.Context, skuID, userID uint64, ttl int64) error
-	RemoveUserBuy(ctx context.Context, skuID, userID uint64) error
+	CheckUserBuy(ctx context.Context, activityID, skuID, userID uint64) (bool, error)
+	MarkUserBuy(ctx context.Context, activityID, skuID, userID uint64, ttl int64) error
+	RemoveUserBuy(ctx context.Context, activityID, skuID, userID uint64) error
+
+	// 优惠券缓存
+	DeleteCoupon(ctx context.Context, couponID uint64) error
 
 	// 分布式锁（防止击穿）
 	SetNX(ctx context.Context, key string, value interface{}, ttl time.Duration) (bool, error)
+	AcquireLock(ctx context.Context, key, token string, ttl time.Duration) (bool, error)
+	RenewLock(ctx context.Context, key, token string, ttl time.Duration) (bool, error)
+	ReleaseLock(ctx context.Context, key, token string) error
 
 	// 通用缓存方法
 	Get(ctx context.Context, key string) (string, error)
 	Set(ctx context.Context, key, value string, ttl time.Duration) error
 	Del(ctx context.Context, key ...string) error
+
+	SetPendingReservation(ctx context.Context, pending *PendingReservation, ttl time.Duration) error
+	DeletePendingReservation(ctx context.Context, requestID string) error
 }
 
 // CachedSeckillProduct 缓存的秒杀商品
@@ -114,5 +139,6 @@ type MQProducer interface {
 	SendAsync(ctx context.Context, msg *mq.SeckillOrderMessage)
 	SendResult(ctx context.Context, result *mq.SeckillResultMessage) error
 	SendToRetry(ctx context.Context, msg *mq.SeckillOrderMessage, retryCount int, delay time.Duration) error
-	SendToDLQ(ctx context.Context, msg *mq.SeckillOrderMessage, reason string, retryCount int) error
+	SendToDLQ(ctx context.Context, msg *mq.SeckillOrderMessage, reason string, retryCount int, topic string, partition int32, offset int64) error
+	SendParseFailureToDLQ(ctx context.Context, raw []byte, topic string, partition int32, offset int64, reason string, headers []*sarama.RecordHeader) error
 }

@@ -1,17 +1,17 @@
 package main
 
 import (
+	"context"
 	"flag"
-	"os"
-
 	"github.com/go-kratos/kratos/v2/config"
 	"github.com/go-kratos/kratos/v2/config/file"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/middleware/tracing"
+	"os"
 	"seckill-service/internal/conf"
+	"seckill-service/internal/observability"
 )
 
-// go build -ldflags "-X main.Version=x.y.z"
 var (
 	Name     = "seckill-service"
 	Version  string
@@ -56,6 +56,34 @@ func main() {
 		panic(err)
 	}
 
+	// 初始化 OpenTelemetry
+	obs := bc.GetObservability()
+	if obs != nil {
+		// 初始化 tracer
+		shutdown, err := observability.InitTracer(context.Background(), observability.TracerConfig{
+			Enabled:     obs.GetEnabled(),
+			ServiceName: obs.GetServiceName(),
+			Env:         obs.GetEnv(),
+			Endpoint:    obs.GetOtelEndpoint(),
+			SampleRatio: obs.GetSampleRatio(),
+		})
+		if err != nil {
+			panic(err)
+		}
+		defer func() { _ = shutdown(context.Background()) }()
+
+		// 启动 matrics server
+		shutdownMetrics, err := observability.StartMetricsServer(
+			obs.GetMetricsAddr(),
+			logger,
+		)
+		if err != nil {
+			panic(err)
+		}
+		defer func() { _ = shutdownMetrics(context.Background()) }()
+	}
+
+	// 初始化应用
 	app, cleanup, err := wireApp(bc.Server, bc.Data, bc.Kafka, logger)
 	if err != nil {
 		panic(err)

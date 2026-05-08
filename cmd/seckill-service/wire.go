@@ -23,6 +23,8 @@ import (
 	"seckill-service/internal/server"
 )
 
+const warmUpActivityID uint64 = 3
+
 // wireApp init kratos application.
 func wireApp(s *conf.Server, d *conf.Data, k *conf.Kafka, logger log.Logger) (*kratos.App, func(), error) {
 	panic(wire.Build(
@@ -51,6 +53,7 @@ func provideKafkaConfig(k *conf.Kafka) *kafka.Config {
 // BackgroundTasks 后台任务启动器
 type BackgroundTasks struct {
 	Consumer       *kafka.Consumer
+	DLQConsumer    *kafka.DLQConsumer
 	DelayQueue     *job.DelayQueue
 	CompensateTask *job.CompensateTask
 	SeckillUsecase *biz.SeckillUsecase
@@ -59,12 +62,14 @@ type BackgroundTasks struct {
 // NewBackgroundTasks 创建后台任务启动器
 func NewBackgroundTasks(
 	consumer *kafka.Consumer,
+	dlqConsumer *kafka.DLQConsumer,
 	delayQueue *job.DelayQueue,
 	compensateTask *job.CompensateTask,
 	seckillUsecase *biz.SeckillUsecase,
 ) *BackgroundTasks {
 	return &BackgroundTasks{
 		Consumer:       consumer,
+		DLQConsumer:    dlqConsumer,
 		DelayQueue:     delayQueue,
 		CompensateTask: compensateTask,
 		SeckillUsecase: seckillUsecase,
@@ -76,11 +81,11 @@ func (b *BackgroundTasks) Start(ctx context.Context, logger log.Logger) {
 	helper := log.NewHelper(logger)
 
 	// 预热缓存
-	helper.Info("开始预热缓存...")
-	if err := b.SeckillUsecase.WarmUpSeckillCache(ctx, 1); err != nil {
+	helper.Infof("开始预热缓存, activity=%d...", warmUpActivityID)
+	if err := b.SeckillUsecase.WarmUpSeckillCache(ctx, warmUpActivityID); err != nil {
 		helper.Warnf("预热缓存失败: %v", err)
 	} else {
-		helper.Info("缓存预热完成")
+		helper.Infof("缓存预热完成, activity=%d", warmUpActivityID)
 	}
 
 	// 启动 Kafka 主消费者
@@ -88,6 +93,13 @@ func (b *BackgroundTasks) Start(ctx context.Context, logger log.Logger) {
 	if err := b.Consumer.Start(ctx); err != nil {
 		helper.Errorf("启动 Kafka 消费者失败: %v", err)
 	}
+
+	helper.Info("启动 Kafka DLQ 消费者...")
+	go func() {
+		if err := b.DLQConsumer.Start(ctx); err != nil {
+			helper.Errorf("启动 Kafka DLQ 消费者失败: %v", err)
+		}
+	}()
 
 	// 启动延迟队列（订单超时取消）
 	helper.Info("启动延迟队列...")
@@ -104,6 +116,10 @@ func (b *BackgroundTasks) Start(ctx context.Context, logger log.Logger) {
 func (b *BackgroundTasks) Stop(ctx context.Context, logger log.Logger) {
 	helper := log.NewHelper(logger)
 	helper.Info("正在停止后台任务...")
+
+	if err := b.DLQConsumer.Stop(); err != nil {
+		helper.Errorf("停止 Kafka DLQ 消费者失败: %v", err)
+	}
 
 	// 停止 Kafka 消费者
 	if err := b.Consumer.Stop(); err != nil {

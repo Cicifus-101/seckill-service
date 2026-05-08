@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"seckill-service/internal/observability"
 	"sync"
 	"time"
 
@@ -86,35 +87,60 @@ func (p *Producer) handleAsyncErrors() {
 }
 
 // Send 同步发送消息
-func (p *Producer) Send(ctx context.Context, msg *mq.SeckillOrderMessage) error {
-	msg.Timestamp = time.Now().Unix()
+func (p *Producer) SendEvent(ctx context.Context, topic string, key string, payload []byte, headers map[string]string) error {
+	producerMsg := &sarama.ProducerMessage{
+		Topic: topic,
+		Key:   sarama.StringEncoder(key),
+		Value: sarama.ByteEncoder(payload),
+	}
+
+	traceHeaders := observability.InjectKafkaHeaders(ctx)
+	for k, v := range traceHeaders {
+		producerMsg.Headers = append(producerMsg.Headers, sarama.RecordHeader{
+			Key:   []byte(k),
+			Value: []byte(v),
+		})
+	}
+
+	// 添加业务自定义消息头
+	for k, v := range headers {
+		producerMsg.Headers = append(producerMsg.Headers, sarama.RecordHeader{
+			Key:   []byte(k),
+			Value: []byte(v),
+		})
+	}
+
+	_, _, err := p.syncProducer.SendMessage(producerMsg)
+	return err
+}
+
+func (p *Producer) Send(ctx context.Context, msg *mq.SeckillOrderMessage) (err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "kafka.produce.SeckillOrder")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("kafka", "produce_seckill_order", result, start)
+	}()
+
+	msg.TraceID = observability.TraceID(ctx)
 
 	data, err := json.Marshal(msg)
 	if err != nil {
-		return fmt.Errorf("marshal message failed: %w", err)
+		return err
 	}
 
-	producerMsg := &sarama.ProducerMessage{
-		Topic: p.orderTopic,
-		Key:   sarama.StringEncoder(msg.OrderNo),
-		Value: sarama.ByteEncoder(data),
-		Headers: []sarama.RecordHeader{
-			{Key: []byte("retry_count"), Value: []byte("0")},
-			{Key: []byte("order_no"), Value: []byte(msg.OrderNo)},
-			{Key: []byte("user_id"), Value: []byte(fmt.Sprintf("%d", msg.UserID))},
-			{Key: []byte("timestamp"), Value: []byte(fmt.Sprintf("%d", msg.Timestamp))},
-		},
+	headers := map[string]string{
+		"retry_count": "0",
+		"order_no":    msg.OrderNo,
+		"trace_id":    msg.TraceID,
+		"request_id":  msg.RequestID,
 	}
 
-	partition, offset, err := p.syncProducer.SendMessage(producerMsg)
-	if err != nil {
-		p.log.WithContext(ctx).Errorf("send message failed: %v", err)
-		return p.SendToDLQ(ctx, msg, err.Error(), 0)
-	}
-
-	p.log.WithContext(ctx).Infof("message sent: orderNo=%s, topic=%s, partition=%d, offset=%d",
-		msg.OrderNo, p.orderTopic, partition, offset)
-	return nil
+	return p.SendEvent(ctx, p.orderTopic, msg.OrderNo, data, headers)
 }
 
 // SendAsync 异步发送
@@ -148,69 +174,59 @@ func (p *Producer) SendAsync(ctx context.Context, msg *mq.SeckillOrderMessage) {
 }
 
 // SendToDLQ 发送到死信队列
-func (p *Producer) SendToDLQ(ctx context.Context, msg *mq.SeckillOrderMessage, reason string, retryCount int) error {
+func (p *Producer) SendToDLQ(ctx context.Context, msg *mq.SeckillOrderMessage, reason string, retryCount int, topic string, partition int32, offset int64) error {
+	msg.TraceID = observability.TraceID(ctx)
+
 	dlqMsg := &mq.DeadLetterMessage{
+		EventID:     msg.EventID,
+		Topic:       topic,
+		Partition:   partition,
+		Offset:      offset,
 		OriginalMsg: *msg,
-		RetryCount:  retryCount,
+		RawPayload:  "",
 		LastError:   reason,
+		RetryCount:  retryCount,
 		NextRetryAt: time.Now().Unix(),
 	}
 
-	data, err := json.Marshal(dlqMsg)
+	payload, err := json.Marshal(dlqMsg)
 	if err != nil {
 		return fmt.Errorf("marshal dlq message failed: %w", err)
 	}
 
-	producerMsg := &sarama.ProducerMessage{
-		Topic: p.dlqTopic,
-		Key:   sarama.StringEncoder(msg.OrderNo),
-		Value: sarama.ByteEncoder(data),
-		Headers: []sarama.RecordHeader{
-			{Key: []byte("retry_count"), Value: []byte(fmt.Sprintf("%d", retryCount))},
-			{Key: []byte("reason"), Value: []byte(reason)},
-		},
+	headers := map[string]string{
+		"retry_count": fmt.Sprintf("%d", retryCount),
+		"reason":      reason,
+		"trace_id":    msg.TraceID,
+		"order_no":    msg.OrderNo,
+		"event_id":    msg.EventID,
 	}
 
-	_, _, err = p.syncProducer.SendMessage(producerMsg)
-	if err != nil {
-		p.log.WithContext(ctx).Errorf("send to DLQ failed: %v", err)
-		return err
-	}
-
-	p.log.WithContext(ctx).Warnf("message sent to DLQ: orderNo=%s, reason=%s, retryCount=%d",
-		msg.OrderNo, reason, retryCount)
-	return nil
+	return p.SendEvent(ctx, p.dlqTopic, msg.OrderNo, payload, headers)
 }
 
 // SendToRetry 发送到重试队列
 func (p *Producer) SendToRetry(ctx context.Context, msg *mq.SeckillOrderMessage, retryCount int, delay time.Duration) error {
-	data, err := json.Marshal(msg)
+	msg.RetryCount = retryCount
+	msg.TraceID = observability.TraceID(ctx)
+	msg.Timestamp = time.Now().Unix()
+
+	payload, err := json.Marshal(msg)
 	if err != nil {
 		return err
 	}
 
-	nextRetryAt := time.Now().Add(delay).Unix()
-
-	producerMsg := &sarama.ProducerMessage{
-		Topic: p.retryTopic,
-		Key:   sarama.StringEncoder(msg.OrderNo),
-		Value: sarama.ByteEncoder(data),
-		Headers: []sarama.RecordHeader{
-			{Key: []byte("retry_count"), Value: []byte(fmt.Sprintf("%d", retryCount))},
-			{Key: []byte("next_retry_at"), Value: []byte(fmt.Sprintf("%d", nextRetryAt))},
-			{Key: []byte("delay"), Value: []byte(delay.String())},
-		},
+	headers := map[string]string{
+		"retry_count":    fmt.Sprintf("%d", retryCount),
+		"next_retry_at":  fmt.Sprintf("%d", time.Now().Add(delay).Unix()),
+		"trace_id":       msg.TraceID,
+		"order_no":       msg.OrderNo,
+		"event_id":       msg.EventID,
+		"request_id":     msg.RequestID,
+		"original_topic": p.orderTopic,
 	}
 
-	_, _, err = p.syncProducer.SendMessage(producerMsg)
-	if err != nil {
-		p.log.WithContext(ctx).Errorf("send to retry queue failed: %v", err)
-		return err
-	}
-
-	p.log.WithContext(ctx).Infof("message sent to retry queue: orderNo=%s, retryCount=%d, delay=%v",
-		msg.OrderNo, retryCount, delay)
-	return nil
+	return p.SendEvent(ctx, p.retryTopic, msg.OrderNo, payload, headers)
 }
 
 // SendResult 发送秒杀结果
@@ -232,6 +248,36 @@ func (p *Producer) SendResult(ctx context.Context, result *mq.SeckillResultMessa
 
 	_, _, err = p.syncProducer.SendMessage(producerMsg)
 	return err
+}
+
+// SendParseFailureToDLQ 消息解析失败
+func (p *Producer) SendParseFailureToDLQ(ctx context.Context, raw []byte, topic string, partition int32, offset int64, reason string, headers []*sarama.RecordHeader) error {
+	meta := map[string]string{}
+	for _, h := range headers {
+		meta[string(h.Key)] = string(h.Value)
+	}
+
+	dlqMsg := &mq.DeadLetterMessage{
+		EventID:     meta["event_id"],
+		Topic:       topic,
+		Partition:   partition,
+		Offset:      offset,
+		RawPayload:  string(raw), // 原始消息的字节数据
+		LastError:   reason,
+		RetryCount:  0,
+		NextRetryAt: time.Now().Unix(),
+	}
+
+	payload, err := json.Marshal(dlqMsg)
+	if err != nil {
+		return err
+	}
+
+	return p.SendEvent(ctx, p.dlqTopic, "parse-error", payload, map[string]string{
+		"reason":   reason,
+		"topic":    topic,
+		"trace_id": meta["trace_id"],
+	})
 }
 
 // Close 关闭生产者

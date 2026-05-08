@@ -122,10 +122,13 @@ CREATE TABLE `coupon` (
                           PRIMARY KEY (`id`),
                           KEY `idx_time` (`start_time`, `end_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='优惠券表';
+
+drop table seckill_order;
 -- 秒杀订单表
 CREATE TABLE `seckill_order` (
                                  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '订单ID',
                                  `order_no` varchar(32) NOT NULL COMMENT '订单编号',
+                                 `request_id` varchar(64) NOT NULL DEFAULT '' COMMENT '请求ID（幂等）',
                                  `user_id` bigint(20) unsigned NOT NULL COMMENT '用户ID',
                                  `activity_id` bigint(20) unsigned NOT NULL COMMENT '活动ID',
                                  `product_id` bigint(20) unsigned NOT NULL COMMENT '商品ID',
@@ -136,9 +139,9 @@ CREATE TABLE `seckill_order` (
                                  `seckill_price` bigint(20) unsigned NOT NULL COMMENT '秒杀单价（快照，单位：分）',
                                  `quantity` int(11) unsigned NOT NULL DEFAULT '1' COMMENT '购买数量',
                                  `order_amount` bigint(20) unsigned NOT NULL COMMENT '订单总金额（单位：分）',
-                                 `final_amount` bigint(20) unsigned NOT NULL DEFAULT 0 COMMENT '实际支付金额（单位：分）',
+                                 `final_amount` bigint(20) unsigned DEFAULT NULL COMMENT '实际支付金额（单位：分）',
                                  `coupon_id` bigint(20) unsigned DEFAULT NULL COMMENT '使用的优惠券ID',
-                                 `couple_discount` bigint(20) unsigned DEFAULT NOT NULL DEFAULT 0 COMMENT '优惠金额（单位：分）',
+                                 `coupon_discount` bigint(20) unsigned  NOT NULL DEFAULT 0 COMMENT '优惠金额（单位：分）',
                                  `address_id` bigint(20) unsigned DEFAULT NULL COMMENT '收货地址ID',
                                  `status` tinyint(4) unsigned NOT NULL DEFAULT '0' COMMENT '状态：0-待支付，1-已支付，2-已取消，3-已退款',
                                  `pay_time` datetime DEFAULT NULL COMMENT '支付时间',
@@ -146,16 +149,13 @@ CREATE TABLE `seckill_order` (
                                  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
                                  PRIMARY KEY (`id`),
                                  UNIQUE KEY `uk_order_no` (`order_no`) COMMENT '订单编号唯一',
-                                 UNIQUE KEY `uk_user_activity_product` (`user_id`, `activity_id`, `product_id`) COMMENT '一人一单幂等',
+                                 UNIQUE KEY `uk_request_id` (`request_id`),
+                                 UNIQUE KEY `uk_user_activity_product` (`user_id`, `activity_id`) COMMENT '一人一单幂等',
                                  KEY `idx_user_id` (`user_id`),
+                                 KEY `idx_create_time` (`create_time`),
                                  KEY `idx_activity_id` (`activity_id`),
                                  KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='秒杀订单表';
-
-use seckill_core;
-ALTER TABLE seckill_order
-    ADD COLUMN coupon_discount bigint unsigned NOT NULL DEFAULT 0 COMMENT '优惠券抵扣金额' AFTER order_amount,
-    ADD COLUMN final_amount bigint unsigned NOT NULL DEFAULT 0 COMMENT '实付金额' AFTER coupon_discount;
 
 
 -- 订单收货信息快照表
@@ -191,6 +191,46 @@ CREATE TABLE `pay_info` (
                             `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
                             `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
                             PRIMARY KEY (`id`),
-                            KEY `idx_order_no` (`order_no`),
+                            UNIQUE KEY `uk_order_no` (`order_no`),
+                            UNIQUE KEY `uk_platform_number` (`platform_number`),
                             KEY `idx_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付信息表';
+
+CREATE TABLE `mq_dead_letter_message` (
+                                          `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+                                          `event_id` varchar(64) NOT NULL COMMENT '事件唯一ID',
+                                          `topic` varchar(128) NOT NULL COMMENT '原始消息Topic',
+                                          `partition_id` int NOT NULL DEFAULT 0 COMMENT '原始消息分区',
+                                          `offset_id` bigint NOT NULL DEFAULT 0 COMMENT '原始消息偏移量',
+                                          `order_no` varchar(32) NOT NULL DEFAULT '' COMMENT '订单号',
+                                          `request_id` varchar(64) NOT NULL DEFAULT '' COMMENT '请求ID',
+                                          `trace_id` varchar(64) NOT NULL DEFAULT '' COMMENT '链路追踪ID',
+                                          `retry_count` int NOT NULL DEFAULT 0 COMMENT '重试次数',
+                                          `error_message` varchar(512) NOT NULL DEFAULT '' COMMENT '错误信息',
+                                          `raw_payload` longtext NOT NULL COMMENT '原始消息内容（JSON）',
+                                          `status` varchar(16) NOT NULL DEFAULT 'PENDING' COMMENT '状态：PENDING-待处理，PROCESSING-处理中，SUCCESS-已处理，FAILED-最终失败，SKIPPED-跳过',
+                                          `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                                          `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                                          PRIMARY KEY (`id`),
+                                          UNIQUE KEY `uk_event_id` (`event_id`) COMMENT '事件ID唯一索引',
+                                          KEY `idx_order_no` (`order_no`) COMMENT '订单号索引',
+                                          KEY `idx_status_create_time` (`status`, `create_time`) COMMENT '状态+创建时间复合索引'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Kafka死信消息表';
+
+
+CREATE TABLE `message_outbox` (
+                                  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+                                  `event_id` varchar(64) NOT NULL COMMENT '事件唯一ID',
+                                  `aggregate_type` varchar(64) NOT NULL COMMENT '聚合根类型（Order/User等）',
+                                  `aggregate_id` varchar(64) NOT NULL COMMENT '聚合根ID（订单号/用户ID等）',
+                                  `topic` varchar(128) NOT NULL COMMENT 'Kafka Topic',
+                                  `payload` json NOT NULL COMMENT '事件负载（JSON格式）',
+                                  `status` tinyint NOT NULL DEFAULT 0 COMMENT '状态：0-待发送，1-已发送，2-发送失败',
+                                  `retry_count` int NOT NULL DEFAULT 0 COMMENT '已重试次数',
+                                  `next_retry_at` datetime DEFAULT NULL COMMENT '下次重试时间（指数退避）',
+                                  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                                  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                                  PRIMARY KEY (`id`),
+                                  UNIQUE KEY `uk_event_id` (`event_id`) COMMENT '事件ID索引',
+                                  KEY `idx_status_next_retry` (`status`, `next_retry_at`) COMMENT '扫描待发送消息的索引'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='本地消息表';

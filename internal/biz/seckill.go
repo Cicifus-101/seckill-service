@@ -2,10 +2,13 @@ package biz
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/go-kratos/kratos/v2/log"
+	"seckill-service/internal/observability"
 
 	"seckill-service/internal/mq"
 	"time"
@@ -15,7 +18,6 @@ const (
 	OrderStatusPending = 0 // 待支付
 	OrderStatusPaid    = 1 // 已支付
 	OrderStatusCancel  = 2 // 已取消
-	OrderStatusRefund  = 3 // 已退款
 )
 
 const (
@@ -24,13 +26,18 @@ const (
 )
 
 const (
-	// 缓存Key前缀
-	cacheKeyActivity      = "seckill:activity:current"         // 当前活动
-	cacheKeyProductList   = "seckill:product:list:%d:%d:%d:%d" // 商品列表: activityID:page:size:sort
-	cacheKeyProductDetail = "seckill:product:detail:%d:%d"     // 商品详情: productID:activityID
-	cacheKeyUserBuy       = "seckill:user:buy:%d:%d"           // 用户购买标记: userID:skuID
-	cacheKeyStock         = "seckill:stock:%d"                 // 库存: skuID
+	PayStatusCreated                 = "CREATED"
+	PayStatusSuccess                 = "SUCCESS"
+	PayStatusFailed                  = "FAILED"
+	PayStatusSuccessButOrderCanceled = "SUCCESS_BUT_ORDER_CANCELED" // 支付成功但是订单已经取消
 )
+
+const (
+	// 缓存Key前缀
+	cacheKeyActivity = "seckill:activity:current" // 当前活动
+)
+
+const mockPaySecret = "seckill_mock_pay_secret"
 
 // Transaction 事务接口
 type Transaction interface {
@@ -40,6 +47,7 @@ type Transaction interface {
 // SkuStock SKU库存信息
 type SkuStock struct {
 	ID           uint64
+	Stock        int32
 	SeckillPrice uint64
 	Version      uint32
 }
@@ -51,13 +59,15 @@ type SeckillUsecase struct {
 	Limiter    RateLimiter
 	Idempotent IdempotentChecker
 	DelayQueue DelayQueue
+	Canceler   *OrderCancelService
+	IDGen      IDGenerator
 	log        *log.Helper
 	tx         Transaction
 }
 
 func NewSeckillUsecase(repo SeckillRepo, cache CacheRepo, mq MQProducer,
-	limiter RateLimiter, idempotent IdempotentChecker, delayQueue DelayQueue,
-	logger log.Logger, tx Transaction) *SeckillUsecase {
+	limiter RateLimiter, idempotent IdempotentChecker, delayQueue DelayQueue, canceler *OrderCancelService,
+	idGen IDGenerator, logger log.Logger, tx Transaction) *SeckillUsecase {
 	return &SeckillUsecase{
 		Repo:       repo,
 		Cache:      cache,
@@ -65,13 +75,26 @@ func NewSeckillUsecase(repo SeckillRepo, cache CacheRepo, mq MQProducer,
 		Limiter:    limiter,
 		Idempotent: idempotent,
 		DelayQueue: delayQueue,
+		Canceler:   canceler,
+		IDGen:      idGen,
 		log:        log.NewHelper(log.With(logger, "module", "usecase/seckill")),
 		tx:         tx,
 	}
 }
 
 // ListSeckillProducts 获取秒杀商品列表
-func (uc *SeckillUsecase) ListSeckillProducts(ctx context.Context, userID, activityID int64, page, pageSize, sortType int32) (*SeckillProductsResult, error) {
+func (uc *SeckillUsecase) ListSeckillProducts(ctx context.Context, userID, activityID int64, page, pageSize, sortType int32) (_ *SeckillProductsResult, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "biz.ListSeckillProducts")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("biz", "ListSeckillProducts", result, start)
+	}()
+
 	// 如果没有指定活动ID，获取当前活动
 	if activityID == 0 {
 		activity, _, err := uc.Repo.GetCurrentActivity(ctx)
@@ -103,7 +126,7 @@ func (uc *SeckillUsecase) ListSeckillProducts(ctx context.Context, userID, activ
 	// 查询购买状态
 	if userID > 0 && len(products) > 0 {
 		for _, p := range products {
-			record, err := uc.Repo.CheckUserBuyRecord(ctx, uint64(userID), uint64(activityID), p.ProductID)
+			record, err := uc.Repo.CheckUserBuyRecord(ctx, uint64(userID), uint64(activityID))
 			if err == nil {
 				p.UserHasBought = record.HasBought
 			}
@@ -152,7 +175,7 @@ func (uc *SeckillUsecase) GetSeckillProductDetail(ctx context.Context, userID, p
 	// 如果已经登录，获取秒杀状态
 	if userID > 0 {
 		// 优先查Redis购买标记
-		hasBought, _ := uc.Cache.CheckUserBuy(ctx, detail.SkuID, userID)
+		hasBought, _ := uc.Cache.CheckUserBuy(ctx, activityID, detail.SkuID, userID)
 		if hasBought {
 			res.UserStatus = &UserSeckillStatus{
 				HasBought: true,
@@ -161,7 +184,7 @@ func (uc *SeckillUsecase) GetSeckillProductDetail(ctx context.Context, userID, p
 			}
 		} else {
 			// 查数据库确认
-			record, err := uc.Repo.CheckUserBuyRecord(ctx, userID, activityID, productID)
+			record, err := uc.Repo.CheckUserBuyRecord(ctx, userID, activityID)
 			if err == nil {
 				res.UserStatus = uc.buildUserStatus(detail, record)
 			}
@@ -170,46 +193,48 @@ func (uc *SeckillUsecase) GetSeckillProductDetail(ctx context.Context, userID, p
 	return res, nil
 }
 
-// getProductDetailWithMutex 带互斥锁的缓存获取（防缓存击穿）
+// getProductDetailWithMutex 带互斥锁的缓存获取（布隆防缓存击穿）
 func (uc *SeckillUsecase) getProductDetailWithMutex(ctx context.Context, productID, activityID uint64) (*SeckillProductDetail, error) {
-	cacheKey := fmt.Sprintf("seckill:product:%d:%d", productID, activityID)
 
-	// 1. 尝试从缓存获取
+	// 1. 先查 Bloom，过滤明显不存在的商品
+	bloomOK, err := uc.Cache.BloomExists(ctx, activityID, productID)
+	if err == nil && !bloomOK {
+		return nil, ErrProductNotFound
+	}
+
+	// 2. 先查缓存
 	detail, err := uc.Cache.GetProductDetail(ctx, productID, activityID)
 	if err == nil && detail != nil {
 		return detail, nil
 	}
 
-	// 2. 检查是否是空值缓存（防穿透）
-	cachedData, _ := uc.Cache.Get(ctx, cacheKey)
-	if cachedData == "NULL" {
-		return nil, ErrProductNotFound
-	}
-
-	// 3. 尝试获取分布式锁（防击穿）
+	// 3. 分布式锁防击穿
 	lockKey := fmt.Sprintf("lock:product:%d:%d", productID, activityID)
 	locked, err := uc.Cache.SetNX(ctx, lockKey, "1", 5*time.Second)
 	if err != nil {
-		uc.log.WithContext(ctx).Warnf("获取分布式锁失败: %v", err)
-		// 获取锁失败，降级到DB查询
-		return uc.Repo.GetSeckillProductDetail(ctx, productID, activityID)
+		detail, cacheErr := uc.Cache.GetProductDetail(ctx, productID, activityID)
+		if cacheErr == nil && detail != nil {
+			return detail, nil
+		}
+
+		uc.log.WithContext(ctx).Warnf("获取商品锁失败: %v", err)
+		return nil, ErrSystemBusy
 	}
 
 	if locked {
 		defer uc.Cache.Del(ctx, lockKey)
 
-		// 双重检查
+		// double check
 		detail, err = uc.Cache.GetProductDetail(ctx, productID, activityID)
 		if err == nil && detail != nil {
 			return detail, nil
 		}
 
-		// 查询DB
+		// 查 DB
 		detail, err = uc.Repo.GetSeckillProductDetail(ctx, productID, activityID)
 		if err != nil {
 			if errors.Is(err, ErrProductNotFound) {
-				// 缓存空值，防穿透
-				uc.Cache.Set(ctx, cacheKey, "NULL", 1*time.Minute)
+				return nil, ErrProductNotFound
 			}
 			return nil, err
 		}
@@ -221,13 +246,23 @@ func (uc *SeckillUsecase) getProductDetailWithMutex(ctx context.Context, product
 		return detail, nil
 	}
 
-	// 未获取到锁，短暂等待后重试
 	time.Sleep(50 * time.Millisecond)
 	return uc.getProductDetailWithMutex(ctx, productID, activityID)
 }
 
 // CreateSeckillOrder 创建秒杀订单
-func (uc *SeckillUsecase) CreateSeckillOrder(ctx context.Context, req *CreateOrderRequest) (*CreateOrderResult, error) {
+func (uc *SeckillUsecase) CreateSeckillOrder(ctx context.Context, req *CreateOrderRequest) (_ *CreateOrderResult, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "biz.CreateSeckillOrder")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("biz", "CreateSeckillOrder", result, start)
+	}()
+
 	// 全局限流
 	allowed, err := uc.Limiter.GlobalRateLimit(ctx, 10000, 20000, time.Second)
 	if err != nil || !allowed {
@@ -265,28 +300,38 @@ func (uc *SeckillUsecase) CreateSeckillOrder(ctx context.Context, req *CreateOrd
 	if err != nil {
 		return nil, err
 	}
-	// 4.2 检查用户是否已购买（一人一单）
-	hasBought, err := uc.Cache.CheckUserBuy(ctx, req.SkuID, req.UserID)
+
+	// 4.2 限购检查
+	if req.Quantity > productInfo.LimitNum {
+		return nil, ErrExceedLimit
+	}
+	// 4.3 一人一单
+	hasBought, err := uc.Cache.CheckUserBuy(ctx, req.ActivityID, req.SkuID, req.UserID)
 	if err == nil && hasBought {
 		uc.log.WithContext(ctx).Warnf("用户已购买(Redis), user=%d, sku=%d", req.UserID, req.SkuID)
 		return nil, ErrAlreadyBought
 	}
-	record, err := uc.Repo.CheckUserBuyRecord(ctx, req.UserID, req.ActivityID, req.ProductID)
+	record, err := uc.Repo.CheckUserBuyRecord(ctx, req.UserID, req.ActivityID)
 	if err != nil {
 		return nil, err
 	}
 	if record.HasBought {
-		uc.Cache.MarkUserBuy(ctx, req.SkuID, req.UserID, 3600)
+		uc.Cache.MarkUserBuy(ctx, req.ActivityID, req.SkuID, req.UserID, 3600)
 		return nil, ErrAlreadyBought
 	}
 
-	// 限购检查
-	if record.Quantity+req.Quantity > int64(productInfo.LimitNum) {
-		return nil, ErrExceedLimit
+	orderAmount := productInfo.SeckillPrice * uint64(req.Quantity)
+	couponDiscount := uint64(0)
+	finalAmount := orderAmount
+	if req.CouponID > 0 {
+		finalAmount, couponDiscount, err = uc.applyCoupon(ctx, req.CouponID, orderAmount)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// 5.1 原子扣减redis库存
-	result, err := uc.Cache.DeductStock(ctx, req.SkuID, req.UserID, int(req.Quantity))
+	result, err := uc.Cache.DeductStock(ctx, req.ActivityID, req.SkuID, req.UserID, int(req.Quantity))
 	if err != nil {
 		uc.log.WithContext(ctx).Errorf("Redis扣库存失败: %v", err)
 		return nil, err
@@ -294,51 +339,88 @@ func (uc *SeckillUsecase) CreateSeckillOrder(ctx context.Context, req *CreateOrd
 	switch result {
 	case -1:
 		uc.log.WithContext(ctx).Warnf("Redis检测到重复购买, user=%d, sku=%d", req.UserID, req.SkuID)
+		if req.CouponID > 0 {
+			_ = uc.Repo.RestoreCoupon(ctx, req.CouponID)
+			_ = uc.Cache.DeleteCoupon(ctx, req.CouponID)
+		}
 		return nil, ErrAlreadyBought
 	case 0:
 		uc.log.WithContext(ctx).Warnf("Redis库存不足或商品不存在, sku=%d", req.SkuID)
+		if req.CouponID > 0 {
+			_ = uc.Repo.RestoreCoupon(ctx, req.CouponID)
+			_ = uc.Cache.DeleteCoupon(ctx, req.CouponID)
+		}
 		return nil, ErrInsufficientStock
 	case 1:
 	default:
 		uc.log.WithContext(ctx).Errorf("Redis扣库存返回未知结果: %d", result)
+		if req.CouponID > 0 {
+			_ = uc.Repo.RestoreCoupon(ctx, req.CouponID)
+			_ = uc.Cache.DeleteCoupon(ctx, req.CouponID)
+		}
 		return nil, fmt.Errorf("扣库存失败")
 	}
 
 	// 6.1 构造MQ消息（异步下单）
+
 	msg := &mq.SeckillOrderMessage{
-		OrderNo:      generateOrderNo(req.UserID),
-		UserID:       req.UserID,
-		SkuID:        req.SkuID,
-		ActivityID:   req.ActivityID,
-		ProductID:    req.ProductID,
-		Quantity:     int(req.Quantity),
-		AddressID:    req.AddressID,
-		CouponID:     req.CouponID,
-		SeckillPrice: productInfo.SeckillPrice,
-		Version:      productInfo.Version,
+		OrderNo:        uc.IDGen.NextString(),
+		RequestID:      req.RequestID,
+		UserID:         req.UserID,
+		SkuID:          req.SkuID,
+		ActivityID:     req.ActivityID,
+		ProductID:      req.ProductID,
+		ProductName:    productInfo.Name,
+		ProductImage:   productInfo.MainImage,
+		Quantity:       int(req.Quantity),
+		AddressID:      req.AddressID,
+		CouponID:       req.CouponID,
+		OrderAmount:    orderAmount,
+		CouponDiscount: couponDiscount,
+		FinalAmount:    finalAmount,
+		SeckillPrice:   productInfo.SeckillPrice,
+		Version:        productInfo.Version,
+		Timestamp:      time.Now().Unix(),
+		EventID:        uc.IDGen.NextString(),
+		TraceID:        observability.TraceID(ctx),
+		RetryCount:     0,
 	}
+
+	_ = uc.Cache.SetPendingReservation(ctx, &PendingReservation{
+		OrderNo:    msg.OrderNo,
+		RequestID:  msg.RequestID,
+		UserID:     msg.UserID,
+		ActivityID: msg.ActivityID,
+		SkuID:      msg.SkuID,
+		Quantity:   msg.Quantity,
+		CreatedAt:  time.Now().Unix(),
+	}, 20*time.Minute)
 
 	// 6.2 发送 MQ 消息
 	if err := uc.MQ.Send(ctx, msg); err != nil {
+		_ = uc.Cache.DeletePendingReservation(ctx, msg.RequestID)
+
 		// 发送失败，回滚 Redis 库存
 		uc.log.WithContext(ctx).Errorf("发送MQ消息失败: %v", err)
-		uc.Cache.RollbackStock(ctx, req.SkuID, int(req.Quantity))
+		_ = uc.Cache.RollbackStock(ctx, req.ActivityID, req.SkuID, int(req.Quantity))
+		_ = uc.Cache.RemoveUserBuy(ctx, req.ActivityID, req.SkuID, req.UserID)
+
+		if req.CouponID > 0 {
+			_ = uc.Repo.RestoreCoupon(ctx, req.CouponID)
+			_ = uc.Cache.DeleteCoupon(ctx, req.CouponID)
+		}
+
 		return nil, err
 	}
 
-	// 6.3 添加延迟队列（用于超时取消）
-	if err := uc.DelayQueue.Add(ctx, msg.OrderNo, 15*time.Minute); err != nil {
-		uc.log.WithContext(ctx).Errorf("添加延迟队列失败: %v", err)
-		// 不影响主流程，仅记录日志
-	}
-
-	uc.Cache.MarkUserBuy(ctx, req.SkuID, req.UserID, 3600)
 	uc.log.WithContext(ctx).Infof("订单创建请求已接收, orderNo=%s, user=%d", msg.OrderNo, req.UserID)
+	_ = uc.Cache.MarkUserBuy(ctx, req.ActivityID, req.SkuID, req.UserID, 3600)
+
 	return &CreateOrderResult{
 		OrderNo:          msg.OrderNo,
-		OrderAmount:      productInfo.SeckillPrice * uint64(req.Quantity),
-		CouponDiscount:   0,
-		FinalAmount:      productInfo.SeckillPrice * uint64(req.Quantity),
+		OrderAmount:      orderAmount,
+		CouponDiscount:   couponDiscount,
+		FinalAmount:      finalAmount,
 		Status:           OrderStatusPending,
 		SeckillPrice:     productInfo.SeckillPrice,
 		Quantity:         req.Quantity,
@@ -347,8 +429,143 @@ func (uc *SeckillUsecase) CreateSeckillOrder(ctx context.Context, req *CreateOrd
 	}, nil
 }
 
+// RollbackSeckillReservation 消费处理失败的回滚
+func (uc *SeckillUsecase) RollbackSeckillReservation(ctx context.Context, msg *mq.SeckillOrderMessage) error {
+	if msg == nil {
+		return errors.New("order message is nil")
+	}
+
+	if err := uc.Cache.RollbackStock(ctx, msg.ActivityID, msg.SkuID, msg.Quantity); err != nil {
+		return err
+	}
+
+	if err := uc.Cache.RemoveUserBuy(ctx, msg.ActivityID, msg.SkuID, msg.UserID); err != nil {
+		return err
+	}
+
+	if msg.CouponID > 0 {
+		_ = uc.Repo.RestoreCoupon(ctx, msg.CouponID)
+		_ = uc.Cache.DeleteCoupon(ctx, msg.CouponID)
+	}
+
+	_ = uc.Cache.DeletePendingReservation(ctx, msg.RequestID)
+	return nil
+}
+
+func (uc *SeckillUsecase) ReplayDeadLetter(ctx context.Context, eventID string) error {
+	dlq, err := uc.Repo.GetDeadLetterMessageByEventID(ctx, eventID)
+	if err != nil {
+		return err
+	}
+
+	var msg mq.SeckillOrderMessage
+	if err := json.Unmarshal([]byte(dlq.RawPayload), &msg); err != nil {
+		return err
+	}
+
+	// 恢复 trace / retry 信息
+	if msg.TraceID == "" {
+		msg.TraceID = dlq.TraceID
+	}
+
+	msg.RetryCount = dlq.RetryCount + 1
+	if msg.EventID == "" {
+		msg.EventID = dlq.EventID
+	}
+
+	// 重新投递到retry topic
+	if err := uc.MQ.SendToRetry(ctx, &msg, msg.RetryCount, 10*time.Second); err != nil {
+		return err
+	}
+
+	return uc.Repo.MarkDeadLetterReplayed(ctx, eventID)
+}
+
+// 事务落库：消费者消费成功后再提交offset的基础
+func (uc *SeckillUsecase) ConfirmSeckillOrder(ctx context.Context, msg *mq.SeckillOrderMessage) (err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "biz.ConfirmSeckillOrder")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("biz", "ConfirmSeckillOrder", result, start)
+	}()
+
+	if msg == nil {
+		return errors.New("order message is null")
+	}
+	err = uc.tx.ExecTx(ctx, func(txCtx context.Context) error {
+		address, err := uc.Repo.GetUserAddress(txCtx, msg.AddressID)
+		if err != nil {
+			return err
+		}
+
+		orderAmount := msg.OrderAmount
+		if orderAmount == 0 {
+			orderAmount = msg.SeckillPrice * uint64(msg.Quantity)
+		}
+
+		finalAmount := msg.FinalAmount
+		if finalAmount == 0 {
+			if msg.CouponDiscount > orderAmount {
+				finalAmount = 0
+			} else {
+				finalAmount = orderAmount - msg.CouponDiscount
+			}
+		}
+
+		orderNo, err := uc.Repo.CreateOrder(txCtx, &Order{
+			OrderNo:        msg.OrderNo,
+			UserID:         msg.UserID,
+			RequestID:      msg.RequestID,
+			ActivityID:     msg.ActivityID,
+			ProductID:      msg.ProductID,
+			SkuID:          msg.SkuID,
+			ProductName:    msg.ProductName,
+			ProductImage:   msg.ProductImage,
+			SeckillPrice:   msg.SeckillPrice,
+			Quantity:       int64(msg.Quantity),
+			OrderAmount:    orderAmount,
+			CouponID:       msg.CouponID,
+			CouponDiscount: msg.CouponDiscount,
+			FinalAmount:    finalAmount,
+			AddressID:      msg.AddressID,
+			Status:         OrderStatusPending,
+		})
+		if err != nil {
+			return err
+		}
+		if orderNo != msg.OrderNo {
+			return ErrOrderExists
+		}
+		if err := uc.Repo.CreateOrderShipping(txCtx, orderNo, address); err != nil {
+			return err
+		}
+
+		if err := uc.Repo.DecreaseStock(txCtx, msg.SkuID, uint32(msg.Quantity), msg.Version); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	// pending 是redis已预扣，但 MySQL 还未确认成功。只有订单事务成功，才能删除
+	_ = uc.Cache.DeletePendingReservation(ctx, msg.RequestID)
+	
+	// 在这里进行订单任务的添加
+	if err := uc.DelayQueue.Add(ctx, msg.OrderNo, OrderTimeoutMinutes*time.Minute); err != nil {
+		uc.log.WithContext(ctx).Warnf("添加延迟取消任务失败，但订单已落库: orderNo=%s err=%v", msg.OrderNo, err)
+	}
+	return nil
+}
+
 func (uc *SeckillUsecase) getActivityFromCacheWithMutex(ctx context.Context) (*Activity, error) {
-	cacheKey := cacheKeyActivity
+	cacheKey := cacheKeyActivity // 缓存空值
 
 	// 尝试从缓存获取
 	cachedData, err := uc.Cache.Get(ctx, cacheKey)
@@ -404,7 +621,18 @@ func (uc *SeckillUsecase) getActivityFromCacheWithMutex(ctx context.Context) (*A
 }
 
 // GetSeckillOrder 获取订单信息
-func (uc *SeckillUsecase) GetSeckillOrder(ctx context.Context, orderNo string, userID uint64) (*OrderInfo, error) {
+func (uc *SeckillUsecase) GetSeckillOrder(ctx context.Context, orderNo string, userID uint64) (_ *OrderInfo, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "biz.GetSeckillOrder")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("biz", "GetSeckillOrder", result, start)
+	}()
+
 	order, err := uc.Repo.GetOrder(ctx, orderNo)
 	if err != nil {
 		return nil, err
@@ -419,17 +647,28 @@ func (uc *SeckillUsecase) GetSeckillOrder(ctx context.Context, orderNo string, u
 }
 
 // PaySeckillOrder 支付订单
-func (uc *SeckillUsecase) PaySeckillOrder(ctx context.Context, req *PayOrderRequest) (*PayOrderResult, error) {
+func (uc *SeckillUsecase) PaySeckillOrder(ctx context.Context, req *PayOrderRequest) (_ *PayOrderResult, err error) {
 	var result *PayOrderResult
-	var isTimeout bool
 
-	err := uc.tx.ExecTx(ctx, func(txctx context.Context) error {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "biz.PaySeckillOrder")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("biz", "PaySeckillOrder", result, start)
+	}()
+
+	err = uc.tx.ExecTx(ctx, func(txctx context.Context) error {
 		// 1.获取订单信息(行锁)
 		order, err := uc.Repo.GetOrderForUpdate(txctx, req.OrderNo)
 		if err != nil {
 			return err
 		}
 
+		// 检查归属
 		if order.UserID != req.UserID {
 			return ErrUserNotMatch
 		}
@@ -439,50 +678,187 @@ func (uc *SeckillUsecase) PaySeckillOrder(ctx context.Context, req *PayOrderRequ
 			return ErrOrderStatusIncorrect
 		}
 
-		// 3.检查支付超时（支付时用户主动进行超时检查）
-		// 4. 超时校验
+		// 3. 超时校验
 		if uc.isOrderTimeout(order.CreateTime) {
-			isTimeout = true
 			return ErrOrderTimeout
 		}
 
+		platformNumber := "P" + uc.IDGen.NextString()
 		// 5.创建支付记录
-		now := time.Now()
 		payInfo := &PayInfo{
 			OrderNo:        req.OrderNo,
 			UserID:         req.UserID,
 			PayPlatform:    req.PayPlatform,
-			PlatformNumber: uc.generatePlatformNumber(req.UserID),
-			PlatformStatus: "SUCCESS",
+			PlatformNumber: platformNumber,
+			PlatformStatus: PayStatusCreated,
 			PayAmount:      order.FinalAmount,
-			PayTime:        &now,
+			PayTime:        nil, // 真正支付成功回调时间
 		}
 
+		// 这里解决的是分布式，防止在事务A还没创建的时候事务B尝试创建，通过唯一键触发检查
 		if err := uc.Repo.CreatePayInfo(txctx, payInfo); err != nil {
-			return fmt.Errorf("创建支付记录失败: %w", err)
-		}
-
-		// 6. 更新订单状态
-		if err := uc.Repo.UpdateOrderStatus(txctx, req.OrderNo, OrderStatusPaid); err != nil {
-			return err
+			if errors.Is(err, ErrPaymentExists) {
+				existPay, getErr := uc.Repo.GetPayInfoByOrderNo(txctx, req.OrderNo)
+				if getErr != nil {
+					return getErr
+				}
+				result = &PayOrderResult{
+					Success:        true,
+					PayAmount:      order.FinalAmount,
+					PlatformNumber: existPay.PlatformNumber,
+				}
+				return nil
+			}
+			return fmt.Errorf("创建支付单失败: %w", err)
 		}
 
 		result = &PayOrderResult{
 			Success:        true,
 			PayAmount:      order.FinalAmount,
-			PlatformNumber: payInfo.PlatformNumber,
+			PlatformNumber: platformNumber,
 		}
 		return nil
 	})
 
-	if err != nil && errors.Is(err, ErrOrderTimeout) && isTimeout {
-		if cancelErr := uc.cancelOrder(ctx, req.OrderNo, "支付超时"); cancelErr != nil {
-			uc.log.WithContext(ctx).Errorf("取消超时订单失败: %v", cancelErr)
-		}
-		return nil, ErrOrderTimeout
+	if err != nil {
+		return nil, err
 	}
 
 	return result, nil
+}
+
+// 支付回调处理方法
+func (uc *SeckillUsecase) HandlePayCallback(ctx context.Context, req *PayCallbackRequest) (_ *PayCallbackResult, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "biz.HandlePayCallback")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("biz", "HandlePayCallback", result, start)
+	}()
+
+	if err := uc.verifyPayCallbackSign(req); err != nil {
+		uc.log.WithContext(ctx).Warnf("支付回调验签失败: orderNo=%s platformNumber=%s err=%v", req.OrderNo, req.PlatformNumber, err)
+		return &PayCallbackResult{Success: false, Message: "invalid sign"}, err
+	}
+
+	var callbackResult *PayCallbackResult
+
+	err = uc.tx.ExecTx(ctx, func(txCtx context.Context) error {
+		payInfo, err := uc.Repo.GetPayInfoByPlatformNumber(txCtx, req.PlatformNumber)
+		if err != nil {
+			return err
+		}
+
+		if payInfo.OrderNo != req.OrderNo {
+			return fmt.Errorf("支付流水订单不匹配")
+		}
+
+		if payInfo.PayAmount != req.PayAmount {
+			uc.log.WithContext(txCtx).Warnf("支付金额不一致: orderNo=%s expected=%d actual=%d",
+				req.OrderNo, payInfo.PayAmount, req.PayAmount)
+			return ErrPayAmountMismatch
+		}
+
+		// 重复成功回调，幂等返回成功
+		if payInfo.PlatformStatus == PayStatusSuccess ||
+			payInfo.PlatformStatus == PayStatusSuccessButOrderCanceled {
+			callbackResult = &PayCallbackResult{
+				Success: true,
+				Message: "duplicate callback ignored",
+			}
+			return nil
+		}
+
+		order, err := uc.Repo.GetOrderForUpdate(txCtx, req.OrderNo)
+		if err != nil {
+			return err
+		}
+
+		payTime := time.Unix(req.PayTime, 0) //时间戳转换成time.Time
+
+		if req.PlatformStatus != PayStatusSuccess {
+			if err := uc.Repo.UpdatePayInfoStatus(txCtx, req.PlatformNumber, PayStatusFailed, &payTime); err != nil {
+				return err
+			}
+			callbackResult = &PayCallbackResult{
+				Success: true,
+				Message: "payment failed recorded",
+			}
+			return nil
+		}
+
+		if order.Status == OrderStatusPaid {
+			if err := uc.Repo.UpdatePayInfoStatus(txCtx, req.PlatformNumber, PayStatusSuccess, &payTime); err != nil {
+				return err
+			}
+
+			callbackResult = &PayCallbackResult{
+				Success: true,
+				Message: "order already paid",
+			}
+			return nil
+		}
+
+		if order.Status == OrderStatusCancel {
+			if err := uc.Repo.UpdatePayInfoStatus(txCtx, req.PlatformNumber, PayStatusSuccessButOrderCanceled, &payTime); err != nil {
+				return err
+			}
+			callbackResult = &PayCallbackResult{
+				Success: true,
+				Message: "order canceled, payment recorded for refund",
+			}
+			return nil
+		}
+
+		if order.Status != OrderStatusPending {
+			return ErrOrderStatusIncorrect
+		}
+
+		if err := uc.Repo.UpdateOrderStatus(txCtx, req.OrderNo, OrderStatusPending, OrderStatusPaid); err != nil {
+			return err
+		}
+
+		if err := uc.Repo.UpdatePayInfoStatus(txCtx, req.PlatformNumber, PayStatusSuccess, &payTime); err != nil {
+			return err
+		}
+
+		callbackResult = &PayCallbackResult{
+			Success: true,
+			Message: "payment success",
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return callbackResult, nil
+}
+
+func (uc *SeckillUsecase) verifyPayCallbackSign(req *PayCallbackRequest) error {
+	expected := uc.buildPayCallbackSign(req)
+	if expected != req.Sign {
+		return errors.New("invalid payment callback sign")
+	}
+	return nil
+}
+func (uc *SeckillUsecase) buildPayCallbackSign(req *PayCallbackRequest) string {
+	raw := fmt.Sprintf("%s|%s|%d|%s|%d|%s",
+		req.OrderNo,
+		req.PlatformNumber,
+		req.PayAmount,
+		req.PlatformStatus,
+		req.PayTime,
+		mockPaySecret,
+	)
+
+	sum := md5.Sum([]byte(raw))
+	return hex.EncodeToString(sum[:])
 }
 
 // InvalidateProductCache 主动失效商品缓存（商品信息更新时调用）
@@ -507,7 +883,18 @@ func (uc *SeckillUsecase) InvalidateActivityCache(ctx context.Context) error {
 }
 
 // CancelOrder 取消订单
-func (uc *SeckillUsecase) CancelOrder(ctx context.Context, orderNo string, userID uint64, reason string) error {
+func (uc *SeckillUsecase) CancelOrder(ctx context.Context, orderNo string, userID uint64, reason string) (err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "biz.CancelOrder")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("biz", "CancelOrder", result, start)
+	}()
+
 	// 获取订单信息验证权限
 	order, err := uc.Repo.GetOrder(ctx, orderNo)
 	if err != nil {
@@ -517,70 +904,79 @@ func (uc *SeckillUsecase) CancelOrder(ctx context.Context, orderNo string, userI
 		return ErrUserNotMatch
 	}
 
-	return uc.cancelOrder(ctx, orderNo, reason)
+	return uc.Canceler.CancelTimeoutOrder(ctx, orderNo, reason)
 }
 
 // cancelOrder 内部取消订单
 func (uc *SeckillUsecase) cancelOrder(ctx context.Context, orderNo string, reason string) error {
-	return uc.tx.ExecTx(ctx, func(txCtx context.Context) error {
-		// 1.获取订单信息（带行锁）
-		order, err := uc.Repo.GetOrderForUpdate(txCtx, orderNo)
-		if err != nil {
-			return fmt.Errorf("获取订单失败: %w", err)
-		}
-
-		// 2.检查订单状态（只取消待支付订单）
-		if order.Status != OrderStatusPending {
-			uc.log.WithContext(txCtx).Warnf("订单状态不是待支付，无法取消: %s, status=%d", orderNo, order.Status)
-			return nil
-		}
-
-		// 3.更新订单状态为已取消
-		if err := uc.Repo.UpdateOrderStatus(txCtx, orderNo, OrderStatusCancel); err != nil {
-			return fmt.Errorf("更新订单状态失败: %w", err)
-		}
-
-		// 4.恢复 MySQL 库存
-		if err := uc.Repo.RestoreStock(txCtx, order.SkuID, uint32(order.Quantity)); err != nil {
-			uc.log.WithContext(txCtx).Errorf("恢复MySQL库存失败: orderNo=%s, err=%v", orderNo, err)
-		}
-
-		// 5.恢复 Redis 库存
-		if err := uc.Cache.RollbackStock(txCtx, order.SkuID, int(order.Quantity)); err != nil {
-			uc.log.WithContext(txCtx).Errorf("恢复Redis库存失败: orderNo=%s, err=%v", orderNo, err)
-		}
-
-		// 6.删除用户购买标记
-		if err := uc.Cache.RemoveUserBuy(txCtx, order.SkuID, order.UserID); err != nil {
-			uc.log.WithContext(txCtx).Warnf("删除用户购买标记失败: %v", err)
-		}
-
-		// 7.恢复优惠券（如果使用优惠券）
-		if order.CouponID > 0 {
-			if err := uc.Repo.RestoreCoupon(txCtx, order.CouponID); err != nil {
-				uc.log.WithContext(txCtx).Warnf("恢复优惠券失败: orderNo=%s, couponID=%d, err=%v",
-					orderNo, order.CouponID, err)
-			}
-		}
-
-		uc.log.WithContext(ctx).Infof("取消订单成功: %s, 原因: %s", orderNo, reason)
-		return nil
-	})
+	return uc.Canceler.CancelTimeoutOrder(ctx, orderNo, reason)
 }
 
 // GetSeckillResult 获取秒杀结果（用于轮询）
 func (uc *SeckillUsecase) GetSeckillResult(ctx context.Context, userID uint64, requestID string) (*SeckillResult, error) {
-	// 这里可以通过Redis或数据库查询秒杀结果
-	// V1版本简单返回处理中
-	return &SeckillResult{
-		Status:  0, // 处理中
-		Message: "处理中",
-	}, nil
+	if requestID == "" {
+		return nil, errors.New("request_id 不能为空")
+	}
+	order, err := uc.Repo.GetOrderByRequestID(ctx, requestID)
+	if err != nil {
+		if errors.Is(err, ErrOrderNotFound) {
+			return &SeckillResult{
+				Status:  0,
+				Message: "处理中",
+			}, nil
+		}
+		return nil, err
+	}
+	if order.UserID != userID {
+		return nil, ErrUserNotMatch
+	}
+	switch order.Status {
+	case OrderStatusPending:
+		return &SeckillResult{
+			Status:      1,
+			OrderNo:     order.OrderNo,
+			OrderAmount: order.OrderAmount,
+			Message:     "下单成功，待支付",
+		}, nil
+
+	case OrderStatusPaid:
+		return &SeckillResult{
+			Status:      1,
+			OrderNo:     order.OrderNo,
+			OrderAmount: order.FinalAmount,
+			Message:     "支付成功",
+		}, nil
+
+	case OrderStatusCancel:
+		return &SeckillResult{
+			Status:  2,
+			OrderNo: order.OrderNo,
+			Message: "订单已取消",
+		}, nil
+
+	default:
+		return &SeckillResult{
+			Status:  2,
+			OrderNo: order.OrderNo,
+			Message: "订单状态异常",
+		}, nil
+	}
 }
 
 // WarmUpSeckillCache 预热秒杀缓存
-func (uc *SeckillUsecase) WarmUpSeckillCache(ctx context.Context, activityID uint64) error {
+func (uc *SeckillUsecase) WarmUpSeckillCache(ctx context.Context, activityID uint64) (err error) {
 	uc.log.WithContext(ctx).Infof("开始预热缓存, activity=%d", activityID)
+
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "biz.WarmUpSeckillCache")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("biz", "WarmUpSeckillCache", result, start)
+	}()
 
 	// 获取活动商品列表
 	products, _, err := uc.Repo.ListSeckillProducts(ctx, activityID, 1, 100, 0)
@@ -634,6 +1030,17 @@ func (uc *SeckillUsecase) WarmUpSeckillCache(ctx context.Context, activityID uin
 
 // applyCoupon 应用优惠券，返回最终金额和优惠金额
 func (uc *SeckillUsecase) applyCoupon(ctx context.Context, couponID uint64, orderAmount uint64) (finalAmount, discount uint64, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "biz.applyCoupon")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("biz", "applyCoupon", result, start)
+	}()
+
 	if couponID == 0 {
 		return orderAmount, 0, nil
 	}
@@ -703,18 +1110,4 @@ func (uc *SeckillUsecase) isOrderTimeout(createTimeStr string) bool {
 		return true
 	}
 	return time.Since(createTime) > OrderTimeoutMinutes*time.Minute
-}
-
-// generatePlatformNumber 生成平台流水号
-func (uc *SeckillUsecase) generatePlatformNumber(userID uint64) string {
-	return fmt.Sprintf("P%d%d", time.Now().UnixNano(), userID%1000)
-}
-
-// generateOrderNo 生成订单号
-func generateOrderNo(userID uint64) string {
-	// 格式：时间戳(纳秒) + 用户ID后3位 + 随机数
-	return fmt.Sprintf("%d%d%d",
-		time.Now().UnixNano(),
-		userID%1000,
-		time.Now().UnixNano()%10000)
 }

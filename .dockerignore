@@ -1,0 +1,9 @@
+.git
+.idea
+.gocache
+bin
+tmp
+*.log
+**/*.test
+docker-compose.override.yml
+README.md

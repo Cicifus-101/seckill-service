@@ -32,12 +32,14 @@ type Config struct {
 }
 
 type ProducerConfig struct {
-	MaxMessageBytes int
-	RequiredAcks    int
-	Compression     string
-	RetryMax        int
-	RetryBackoff    time.Duration
-	Timeout         time.Duration
+	MaxMessageBytes   int
+	RequiredAcks      int
+	Compression       string
+	RetryMax          int
+	RetryBackoff      time.Duration
+	Timeout           time.Duration
+	EnableIdempotence bool
+	MaxInFlight       int
 }
 
 type ConsumerConfig struct {
@@ -61,12 +63,14 @@ func FromProto(cfg *conf.Kafka) *Config {
 		ConsumerGroup: cfg.ConsumerGroup,
 		ClientID:      cfg.ClientId,
 		Producer: ProducerConfig{
-			MaxMessageBytes: int(cfg.Producer.MaxMessageBytes),
-			RequiredAcks:    int(cfg.Producer.RequiredAcks),
-			Compression:     cfg.Producer.Compression,
-			RetryMax:        int(cfg.Producer.RetryMax),
-			RetryBackoff:    cfg.Producer.RetryBackoff.AsDuration(),
-			Timeout:         cfg.Producer.Timeout.AsDuration(),
+			MaxMessageBytes:   int(cfg.Producer.MaxMessageBytes),
+			RequiredAcks:      int(cfg.Producer.RequiredAcks),
+			Compression:       cfg.Producer.Compression,
+			RetryMax:          int(cfg.Producer.RetryMax),
+			RetryBackoff:      cfg.Producer.RetryBackoff.AsDuration(),
+			Timeout:           cfg.Producer.Timeout.AsDuration(),
+			EnableIdempotence: cfg.Producer.EnableIdempotence,
+			MaxInFlight:       int(cfg.Producer.MaxInFlight),
 		},
 		Consumer: ConsumerConfig{
 			SessionTimeout:    cfg.Consumer.SessionTimeout.AsDuration(),
@@ -118,6 +122,12 @@ func (c *Config) NewSaramaConfig() *sarama.Config {
 	config.Producer.Retry.Max = c.Producer.RetryMax
 	config.Producer.Retry.Backoff = c.Producer.RetryBackoff
 	config.Producer.Timeout = c.Producer.Timeout
+	config.Producer.Idempotent = c.Producer.EnableIdempotence
+	if c.Producer.EnableIdempotence {
+		config.Net.MaxOpenRequests = c.Producer.MaxInFlight
+		config.Producer.RequiredAcks = sarama.WaitForAll
+		config.Producer.Retry.Max = c.Producer.RetryMax
+	}
 
 	// 压缩配置
 	switch c.Producer.Compression {
