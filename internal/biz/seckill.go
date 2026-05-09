@@ -324,7 +324,7 @@ func (uc *SeckillUsecase) CreateSeckillOrder(ctx context.Context, req *CreateOrd
 	couponDiscount := uint64(0)
 	finalAmount := orderAmount
 	if req.CouponID > 0 {
-		finalAmount, couponDiscount, err = uc.applyCoupon(ctx, req.CouponID, orderAmount)
+		finalAmount, couponDiscount, err = uc.applyCoupon(ctx, req.CouponID, req.UserID, orderAmount)
 		if err != nil {
 			return nil, err
 		}
@@ -340,14 +340,14 @@ func (uc *SeckillUsecase) CreateSeckillOrder(ctx context.Context, req *CreateOrd
 	case -1:
 		uc.log.WithContext(ctx).Warnf("Redis检测到重复购买, user=%d, sku=%d", req.UserID, req.SkuID)
 		if req.CouponID > 0 {
-			_ = uc.Repo.RestoreCoupon(ctx, req.CouponID)
+			_ = uc.Repo.RestoreUserCoupon(ctx, req.CouponID)
 			_ = uc.Cache.DeleteCoupon(ctx, req.CouponID)
 		}
 		return nil, ErrAlreadyBought
 	case 0:
 		uc.log.WithContext(ctx).Warnf("Redis库存不足或商品不存在, sku=%d", req.SkuID)
 		if req.CouponID > 0 {
-			_ = uc.Repo.RestoreCoupon(ctx, req.CouponID)
+			_ = uc.Repo.RestoreUserCoupon(ctx, req.CouponID)
 			_ = uc.Cache.DeleteCoupon(ctx, req.CouponID)
 		}
 		return nil, ErrInsufficientStock
@@ -355,7 +355,7 @@ func (uc *SeckillUsecase) CreateSeckillOrder(ctx context.Context, req *CreateOrd
 	default:
 		uc.log.WithContext(ctx).Errorf("Redis扣库存返回未知结果: %d", result)
 		if req.CouponID > 0 {
-			_ = uc.Repo.RestoreCoupon(ctx, req.CouponID)
+			_ = uc.Repo.RestoreUserCoupon(ctx, req.CouponID)
 			_ = uc.Cache.DeleteCoupon(ctx, req.CouponID)
 		}
 		return nil, fmt.Errorf("扣库存失败")
@@ -406,7 +406,7 @@ func (uc *SeckillUsecase) CreateSeckillOrder(ctx context.Context, req *CreateOrd
 		_ = uc.Cache.RemoveUserBuy(ctx, req.ActivityID, req.SkuID, req.UserID)
 
 		if req.CouponID > 0 {
-			_ = uc.Repo.RestoreCoupon(ctx, req.CouponID)
+			_ = uc.Repo.RestoreUserCoupon(ctx, req.CouponID)
 			_ = uc.Cache.DeleteCoupon(ctx, req.CouponID)
 		}
 
@@ -444,7 +444,7 @@ func (uc *SeckillUsecase) RollbackSeckillReservation(ctx context.Context, msg *m
 	}
 
 	if msg.CouponID > 0 {
-		_ = uc.Repo.RestoreCoupon(ctx, msg.CouponID)
+		_ = uc.Repo.RestoreUserCoupon(ctx, msg.CouponID)
 		_ = uc.Cache.DeleteCoupon(ctx, msg.CouponID)
 	}
 
@@ -556,7 +556,7 @@ func (uc *SeckillUsecase) ConfirmSeckillOrder(ctx context.Context, msg *mq.Secki
 
 	// pending 是redis已预扣，但 MySQL 还未确认成功。只有订单事务成功，才能删除
 	_ = uc.Cache.DeletePendingReservation(ctx, msg.RequestID)
-	
+
 	// 在这里进行订单任务的添加
 	if err := uc.DelayQueue.Add(ctx, msg.OrderNo, OrderTimeoutMinutes*time.Minute); err != nil {
 		uc.log.WithContext(ctx).Warnf("添加延迟取消任务失败，但订单已落库: orderNo=%s err=%v", msg.OrderNo, err)
@@ -1029,7 +1029,7 @@ func (uc *SeckillUsecase) WarmUpSeckillCache(ctx context.Context, activityID uin
 }
 
 // applyCoupon 应用优惠券，返回最终金额和优惠金额
-func (uc *SeckillUsecase) applyCoupon(ctx context.Context, couponID uint64, orderAmount uint64) (finalAmount, discount uint64, err error) {
+func (uc *SeckillUsecase) applyCoupon(ctx context.Context, couponID, userID uint64, orderAmount uint64) (finalAmount, discount uint64, err error) {
 	start := time.Now()
 	ctx, span := observability.Start(ctx, "biz.applyCoupon")
 	defer func() {
@@ -1045,7 +1045,7 @@ func (uc *SeckillUsecase) applyCoupon(ctx context.Context, couponID uint64, orde
 		return orderAmount, 0, nil
 	}
 
-	coupon, err := uc.Repo.GetCoupon(ctx, couponID)
+	coupon, err := uc.Repo.GetUserCouponForUse(ctx, couponID, userID)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -1069,7 +1069,7 @@ func (uc *SeckillUsecase) applyCoupon(ctx context.Context, couponID uint64, orde
 	finalAmount = orderAmount - discount
 
 	// 扣减优惠券库存
-	if err := uc.Repo.UseCoupon(ctx, coupon.ID, coupon.Version); err != nil {
+	if err := uc.Repo.UseUserCoupon(ctx, coupon.ID); err != nil {
 		return 0, 0, err
 	}
 

@@ -99,6 +99,25 @@ type Coupon struct {
 	Version   uint32
 }
 
+type UserCoupon struct {
+	ID             uint64
+	UserID         uint64
+	CouponID       uint64
+	Name           string
+	Type           int32
+	Value          uint64
+	MinAmount      uint64
+	Scene          string
+	SourceType     string
+	SourceID       string
+	IdempotencyKey string
+	Status         int32
+	ReceivedTime   string
+	UsedTime       string
+	ExpireTime     string
+	Version        uint32
+}
+
 // Order 创建订单参数
 type Order struct {
 	OrderNo        string

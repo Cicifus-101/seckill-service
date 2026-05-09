@@ -47,7 +47,7 @@ func (s *OrderCancelService) CancelTimeoutOrder(ctx context.Context, orderNo str
 		}
 
 		if order.CouponID > 0 {
-			if err := s.repo.RestoreCoupon(txCtx, order.CouponID); err != nil {
+			if err := s.repo.RestoreUserCoupon(txCtx, order.CouponID); err != nil {
 				return fmt.Errorf("恢复优惠券失败: %w", err)
 			}
 		}

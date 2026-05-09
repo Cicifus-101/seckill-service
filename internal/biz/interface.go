@@ -46,6 +46,11 @@ type SeckillRepo interface {
 	GetCoupon(ctx context.Context, couponID uint64) (*Coupon, error)
 	UseCoupon(ctx context.Context, couponID uint64, version uint32) error
 	RestoreCoupon(ctx context.Context, couponID uint64) error // 恢复优惠券库存
+	GrantUserCoupon(ctx context.Context, req *GrantCouponRequest, template *CouponTemplate) (*UserCoupon, bool, error)
+	GetUserCouponForUse(ctx context.Context, userCouponID, userID uint64) (*UserCoupon, error)
+	UseUserCoupon(ctx context.Context, userCouponID uint64) error
+	RestoreUserCoupon(ctx context.Context, userCouponID uint64) error
+	ListUserCoupons(ctx context.Context, userID uint64, status int32, page, pageSize int32) ([]*UserCoupon, int64, error)
 
 	// 支付相关
 	GetPayInfoByPlatformNumber(ctx context.Context, platformNumber string) (*PayInfo, error)

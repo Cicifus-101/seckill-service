@@ -49,6 +49,14 @@ service Seckill{
   rpc PayCallback(PayCallbackRequest) returns (PayCallbackReply) {
   }
 
+  // 评价/业务侧触发发券，供 review-service gRPC 联调
+  rpc GrantCouponByReview(GrantCouponByReviewRequest) returns (GrantCouponByReviewReply) {
+  }
+
+  // 查询用户已领取的优惠券
+  rpc ListUserCoupons(ListUserCouponsRequest) returns (ListUserCouponsReply) {
+  }
+
   rpc ReplayDeadLetter(ReplayDeadLetterRequest) returns (ReplayDeadLetterReply) {
   }
 }
@@ -163,7 +171,7 @@ message GetCurrentActivityResponse {
 message CouponInfo {
   int64 id = 1;
   string name = 2;
-  int32 type = 3;        // 1-满减 2-打折
+  int32 type = 3;        // 1-代金券/满减 2-打折
   int64 value = 4;       // 面额或折扣率
   int64 min_amount = 5;  // 使用门槛
   string end_time = 6;
@@ -177,7 +185,7 @@ message CreateSeckillOrderRequest {
   int64 activity_id = 3;
   int64 product_id = 4;
   int64 quantity = 5;    // 默认1
-  int64 coupon_id = 6;   // 使用的优惠券ID（可选）
+  int64 coupon_id = 6;   // 使用的用户券ID（user_coupon.id，可选）
   int64 address_id = 7;
   string client_ip = 8;  // 用于限流
   string request_id = 9; // 幂等请求ID
@@ -289,6 +297,55 @@ message PayCallbackRequest {
 message PayCallbackReply {
   bool success = 1;
   string message = 2;
+}
+
+// ----------------8.评价触发发券------------------
+
+message GrantCouponByReviewRequest {
+  int64 user_id = 1;
+  int64 review_id = 2;
+  string order_no = 3;
+  int64 product_id = 4;
+  int32 rating = 5;  // 评分，5为高满意，3触发客服接入，1触发售后补偿
+  bool has_image = 6;
+  bool is_first_review = 7;  // FIRST_REVIEW > PHOTO_REVIEW > GOOD_REVIEW 鼓励完成评价
+  string scene = 8;          // FIRST_REVIEW/GOOD_REVIEW/PHOTO_REVIEW/INVITE_NEW/AFTER_SALE_COMPENSATION，可为空自动判断
+  string idempotency_key = 9; // 评价服务侧幂等键，建议 review:{review_id}:{scene} （防止agent重复调用）
+}
+
+message GrantCouponByReviewReply {
+  bool success = 1;
+  string message = 2;
+  UserCouponInfo coupon = 3;
+  bool duplicated = 4;
+}
+
+message ListUserCouponsRequest {
+  int64 user_id = 1;
+  int32 status = 2; // 0-全部 1-未使用 2-已使用 3-已过期
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message ListUserCouponsReply {
+  repeated UserCouponInfo coupons = 1;
+  int64 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message UserCouponInfo {
+  int64 id = 1;          // 用户券实例ID：user_coupon.id，下单时传入 CreateSeckillOrderRequest.coupon_id
+  int64 coupon_id = 2;   // coupon 模板ID
+  string name = 3;
+  int32 type = 4;        // 1-代金券/满减 2-打折
+  int64 value = 5;
+  int64 min_amount = 6;  // 最低消费门槛
+  string scene = 7;
+  int32 status = 8;      // 1-未使用 2-已使用 3-已过期
+  string received_time = 9;  // 领取时间
+  string used_time = 10;
+  string expire_time = 11;  // 过期时间
 }
 
 message ReplayDeadLetterRequest {

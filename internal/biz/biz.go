@@ -52,7 +52,8 @@ var (
 
 // 优惠券相关错误
 var (
-	ErrCouponInvalid  = errors.New("优惠券无效或已过期")
-	ErrCouponUsed     = errors.New("优惠券已被使用")
-	ErrCouponNotMatch = errors.New("不满足优惠券使用条件")
+	ErrCouponInvalid      = errors.New("优惠券无效或已过期")
+	ErrCouponUsed         = errors.New("优惠券已被使用")
+	ErrCouponNotMatch     = errors.New("不满足优惠券使用条件")
+	ErrCouponSceneInvalid = errors.New("发券场景不满足条件")
 )

@@ -40,6 +40,24 @@ type CreateOrderRequest struct {
 	RequestID  string
 }
 
+type GrantCouponRequest struct {
+	UserID         uint64
+	ReviewID       uint64
+	OrderNo        string
+	ProductID      uint64
+	Rating         int32
+	HasImage       bool
+	IsFirstReview  bool
+	Scene          string
+	IdempotencyKey string
+}
+
+type GrantCouponResult struct {
+	Coupon     *UserCoupon
+	Duplicated bool
+	Message    string
+}
+
 // CreateOrderResult 创建订单结果
 type CreateOrderResult struct {
 	OrderNo          string

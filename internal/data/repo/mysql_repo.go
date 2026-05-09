@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"fmt"
 	"seckill-service/internal/data"
 	"seckill-service/internal/observability"
 	"strings"
@@ -478,6 +479,225 @@ func (r *mysqlRepo) RestoreCoupon(ctx context.Context, couponID uint64) error {
 		return errors.New("恢复优惠券失败")
 	}
 	return nil
+}
+
+func (r *mysqlRepo) GrantUserCoupon(ctx context.Context, req *biz.GrantCouponRequest, template *biz.CouponTemplate) (*biz.UserCoupon, bool, error) {
+	db := r.data.GetCoreDB(ctx)
+	now := time.Now()
+
+	var existing coreModel.UserCoupon
+	if err := db.Preload("Coupon").Where("idempotency_key = ?", req.IdempotencyKey).First(&existing).Error; err == nil {
+		return toBizUserCoupon(&existing), true, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, false, err
+	}
+
+	coupon, err := r.getOrCreateCouponTemplate(ctx, template)
+	if err != nil {
+		return nil, false, err
+	}
+
+	sourceID := fmt.Sprintf("%d", req.ReviewID)
+	// 拉新场景
+	if req.Scene == biz.CouponSceneInviteNew && req.ReviewID == 0 {
+		sourceID = fmt.Sprintf("%d", req.UserID)
+	}
+	userCoupon := &coreModel.UserCoupon{
+		UserID:         req.UserID,
+		CouponID:       coupon.ID,
+		Scene:          req.Scene,
+		SourceType:     sourceTypeByScene(req.Scene),
+		SourceID:       sourceID,
+		IdempotencyKey: req.IdempotencyKey,
+		Status:         biz.UserCouponStatusUnused,
+		ReceivedTime:   now,
+		ExpireTime:     now.AddDate(0, 0, template.ValidDays),
+	}
+
+	// 处理并发幂等
+	if err := db.Create(userCoupon).Error; err != nil {
+		if strings.Contains(err.Error(), "Duplicate entry") {
+			if findErr := db.Preload("Coupon").Where("idempotency_key = ?", req.IdempotencyKey).First(&existing).Error; findErr != nil {
+				return nil, false, findErr
+			}
+			return toBizUserCoupon(&existing), true, nil
+		}
+		return nil, false, err
+	}
+
+	info := db.Model(&coreModel.Coupon{}).
+		Where("id = ? AND remain_count > 0", coupon.ID).
+		Updates(map[string]interface{}{
+			"remain_count": gorm.Expr("remain_count - 1"),
+			"version":      gorm.Expr("version + 1"),
+		})
+	if info.Error != nil {
+		return nil, false, info.Error
+	}
+	if info.RowsAffected == 0 {
+		return nil, false, biz.ErrCouponInvalid
+	}
+
+	userCoupon.Coupon = coupon
+	return toBizUserCoupon(userCoupon), false, nil
+}
+
+// getOrCreateCouponTemplate 获取或创建券模板
+func (r *mysqlRepo) getOrCreateCouponTemplate(ctx context.Context, template *biz.CouponTemplate) (*coreModel.Coupon, error) {
+	db := r.data.GetCoreDB(ctx)
+	now := time.Now()
+	var coupon coreModel.Coupon
+	err := db.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("name = ? AND type = ? AND value = ? AND min_amount = ?", template.Name, template.Type, template.Value, template.MinAmount).
+		First(&coupon).Error
+	if err == nil {
+		return &coupon, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	limit := uint32(1)
+	coupon = coreModel.Coupon{
+		Name:        template.Name,
+		Type:        template.Type,
+		Value:       template.Value,
+		MinAmount:   template.MinAmount,
+		TotalCount:  100000,
+		RemainCount: 100000,
+		UserLimit:   &limit,
+		StartTime:   now.Add(-time.Hour),
+		EndTime:     now.AddDate(10, 0, 0),
+		Version:     0,
+	}
+	if err := db.Create(&coupon).Error; err != nil {
+		if strings.Contains(err.Error(), "Duplicate entry") {
+			if findErr := db.Where("name = ? AND type = ? AND value = ? AND min_amount = ?", template.Name, template.Type, template.Value, template.MinAmount).
+				First(&coupon).Error; findErr != nil {
+				return nil, findErr
+			}
+			return &coupon, nil
+		}
+		return nil, err
+	}
+	return &coupon, nil
+}
+
+func (r *mysqlRepo) GetUserCouponForUse(ctx context.Context, userCouponID, userID uint64) (*biz.UserCoupon, error) {
+	db := r.data.GetCoreDB(ctx)
+	var userCoupon coreModel.UserCoupon
+	err := db.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Preload("Coupon").
+		Where("id = ? AND user_id = ? AND status = ? AND expire_time >= ?", userCouponID, userID, biz.UserCouponStatusUnused, time.Now()).
+		First(&userCoupon).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, biz.ErrCouponInvalid
+		}
+		return nil, err
+	}
+	return toBizUserCoupon(&userCoupon), nil
+}
+
+func (r *mysqlRepo) UseUserCoupon(ctx context.Context, userCouponID uint64) error {
+	info := r.data.GetCoreDB(ctx).Model(&coreModel.UserCoupon{}).
+		Where("id = ? AND status = ? AND expire_time >= ?", userCouponID, biz.UserCouponStatusUnused, time.Now()).
+		Updates(map[string]interface{}{
+			"status":    biz.UserCouponStatusUsed,
+			"used_time": time.Now(),
+		})
+	if info.Error != nil {
+		return info.Error
+	}
+	if info.RowsAffected == 0 {
+		return biz.ErrCouponUsed
+	}
+	return nil
+}
+
+func (r *mysqlRepo) RestoreUserCoupon(ctx context.Context, userCouponID uint64) error {
+	info := r.data.GetCoreDB(ctx).Model(&coreModel.UserCoupon{}).
+		Where("id = ? AND status = ?", userCouponID, biz.UserCouponStatusUsed).
+		Updates(map[string]interface{}{
+			"status":    biz.UserCouponStatusUnused,
+			"used_time": nil,
+		})
+	if info.Error != nil {
+		return info.Error
+	}
+	return nil
+}
+
+func (r *mysqlRepo) ListUserCoupons(ctx context.Context, userID uint64, status int32, page, pageSize int32) ([]*biz.UserCoupon, int64, error) {
+	db := r.data.GetCoreDB(ctx).Model(&coreModel.UserCoupon{}).Preload("Coupon").Where("user_id = ?", userID)
+	now := time.Now()
+	switch status {
+	case biz.UserCouponStatusUnused:
+		db = db.Where("status = ? AND expire_time >= ?", biz.UserCouponStatusUnused, now)
+	case biz.UserCouponStatusUsed:
+		db = db.Where("status = ?", biz.UserCouponStatusUsed)
+	case biz.UserCouponStatusExpired:
+		db = db.Where("status = ? OR expire_time < ?", biz.UserCouponStatusExpired, now)
+	}
+
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var rows []coreModel.UserCoupon
+	if err := db.Order("id DESC").Offset(int((page - 1) * pageSize)).Limit(int(pageSize)).Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+
+	res := make([]*biz.UserCoupon, 0, len(rows))
+	for i := range rows {
+		res = append(res, toBizUserCoupon(&rows[i]))
+	}
+	return res, total, nil
+}
+
+func sourceTypeByScene(scene string) string {
+	switch scene {
+	case biz.CouponSceneInviteNew:
+		return "INVITE"
+	case biz.CouponSceneAfterSaleCompensation:
+		return "AFTER_SALE"
+	default:
+		return "REVIEW"
+	}
+}
+
+func toBizUserCoupon(row *coreModel.UserCoupon) *biz.UserCoupon {
+	if row == nil {
+		return nil
+	}
+	res := &biz.UserCoupon{
+		ID:             row.ID,
+		UserID:         row.UserID,
+		CouponID:       row.CouponID,
+		Scene:          row.Scene,
+		SourceType:     row.SourceType,
+		SourceID:       row.SourceID,
+		IdempotencyKey: row.IdempotencyKey,
+		Status:         row.Status,
+		ReceivedTime:   row.ReceivedTime.Format("2006-01-02 15:04:05"),
+		ExpireTime:     row.ExpireTime.Format("2006-01-02 15:04:05"),
+	}
+	if row.UsedTime != nil {
+		res.UsedTime = row.UsedTime.Format("2006-01-02 15:04:05")
+	}
+	if row.Coupon != nil {
+		res.Name = row.Coupon.Name
+		res.Type = row.Coupon.Type
+		res.Value = row.Coupon.Value
+		res.MinAmount = row.Coupon.MinAmount
+		res.Version = row.Coupon.Version
+	}
+	if res.Status == biz.UserCouponStatusUnused && row.ExpireTime.Before(time.Now()) {
+		res.Status = biz.UserCouponStatusExpired
+	}
+	return res
 }
 
 // CreateOrder 创建订单

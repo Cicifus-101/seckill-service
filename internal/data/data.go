@@ -139,6 +139,14 @@ func (d *Data) GetCoreQuery(ctx context.Context) *query.Query {
 	return d.Core
 }
 
+// GetCoreDB 获取核心库 DB（支持事务），用于少量非 gen 模型。
+func (d *Data) GetCoreDB(ctx context.Context) *gorm.DB {
+	if tx, ok := ctx.Value("tx").(*gorm.DB); ok {
+		return tx.WithContext(ctx)
+	}
+	return d.coreDB.WithContext(ctx)
+}
+
 // GetCoreQueryForTx 用于事务中的查询（返回带上下文的查询）
 func (d *Data) GetCoreQueryForTx(ctx context.Context) interface{} {
 	if tx, ok := ctx.Value("tx").(*gorm.DB); ok {

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	stderrors "errors"
+	"strings"
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	"google.golang.org/grpc/codes"
@@ -10,7 +11,6 @@ import (
 	v1 "seckill-service/api/seckill/v1"
 	"seckill-service/internal/biz"
 	"seckill-service/internal/observability"
-	"strings"
 	"time"
 )
 

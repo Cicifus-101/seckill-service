@@ -123,6 +123,28 @@ CREATE TABLE `coupon` (
                           KEY `idx_time` (`start_time`, `end_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='优惠券表';
 
+-- 用户优惠券表：评价/拉新/售后等业务侧发券后，用户真实持有的券实例
+CREATE TABLE IF NOT EXISTS `user_coupon` (
+                             `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+                             `user_id` bigint(20) unsigned NOT NULL COMMENT '用户ID',
+                             `coupon_id` bigint(20) unsigned NOT NULL COMMENT '优惠券模板ID',
+                             `scene` varchar(32) NOT NULL DEFAULT '' COMMENT '发券场景',
+                             `source_type` varchar(32) NOT NULL DEFAULT '' COMMENT '来源类型，如 REVIEW/INVITE/AFTER_SALE',
+                             `source_id` varchar(64) NOT NULL DEFAULT '' COMMENT '来源ID，如 review_id',
+                             `idempotency_key` varchar(128) NOT NULL COMMENT '发券幂等键',
+                             `status` tinyint(4) NOT NULL DEFAULT '1' COMMENT '状态：1-未使用，2-已使用，3-已过期',
+                             `received_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '领取时间',
+                             `used_time` datetime DEFAULT NULL COMMENT '使用时间',
+                             `expire_time` datetime NOT NULL COMMENT '过期时间',
+                             `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                             `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                             PRIMARY KEY (`id`),
+                             UNIQUE KEY `uk_idempotency_key` (`idempotency_key`),
+                             KEY `idx_user_status` (`user_id`, `status`),
+                             KEY `idx_coupon_id` (`coupon_id`),
+                             KEY `idx_expire_time` (`expire_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户优惠券表';
+
 drop table seckill_order;
 -- 秒杀订单表
 CREATE TABLE `seckill_order` (
