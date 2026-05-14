@@ -180,6 +180,7 @@ type PendingReservation struct {
 	ActivityID uint64 `json:"activity_id"`
 	SkuID      uint64 `json:"sku_id"`
 	Quantity   int    `json:"quantity"`
+	CouponID   uint64 `json:"coupon_id"`
 	CreatedAt  int64  `json:"created_at"`
 }
 

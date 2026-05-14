@@ -57,6 +57,14 @@ service Seckill{
   rpc ListUserCoupons(ListUserCouponsRequest) returns (ListUserCouponsReply) {
   }
 
+  // 后台更新活动信息：先更新 DB，再失效活动/商品列表缓存，可选重新预热
+  rpc UpdateSeckillActivity(UpdateSeckillActivityRequest) returns (UpdateSeckillActivityReply) {
+  }
+
+  // 后台更新秒杀商品：先更新 DB，再失效商品详情/商品列表缓存，可选重新预热
+  rpc UpdateSeckillProduct(UpdateSeckillProductRequest) returns (UpdateSeckillProductReply) {
+  }
+
   rpc ReplayDeadLetter(ReplayDeadLetterRequest) returns (ReplayDeadLetterReply) {
   }
 }
@@ -346,6 +354,44 @@ message UserCouponInfo {
   string received_time = 9;  // 领取时间
   string used_time = 10;
   string expire_time = 11;  // 过期时间
+}
+
+// ----------------9.后台缓存一致性写入口------------------
+
+message UpdateSeckillActivityRequest {
+  int64 activity_id = 1;
+  string title = 2;
+  string description = 3;
+  string start_time = 4; // 格式：2006-01-02 15:04:05
+  string end_time = 5;   // 格式：2006-01-02 15:04:05
+  int32 status = 6;      // 0-未开始 1-进行中 2-已结束
+  bool warm_up = 7;      // 是否在失效缓存后重新预热
+}
+
+message UpdateSeckillActivityReply {
+  bool success = 1;
+  string message = 2;
+}
+
+message UpdateSeckillProductRequest {
+  int64 activity_id = 1;
+  int64 product_id = 2;
+  string name = 3;
+  string subtitle = 4;
+  string main_image = 5;
+  string detail = 6;
+  int32 product_status = 7; // 1-上架 2-下架
+  int64 seckill_price = 8;
+  int64 market_price = 9;
+  int64 total_stock = 10;
+  int64 available_stock = 11;
+  int64 limit_num = 12;
+  bool warm_up = 13;        // 是否在失效缓存后重新预热
+}
+
+message UpdateSeckillProductReply {
+  bool success = 1;
+  string message = 2;
 }
 
 message ReplayDeadLetterRequest {

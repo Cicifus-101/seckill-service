@@ -58,6 +58,32 @@ type GrantCouponResult struct {
 	Message    string
 }
 
+type UpdateActivityRequest struct {
+	ActivityID  uint64
+	Title       string
+	Description string
+	StartTime   string
+	EndTime     string
+	Status      int32
+	WarmUp      bool
+}
+
+type UpdateProductRequest struct {
+	ActivityID     uint64
+	ProductID      uint64
+	Name           string
+	Subtitle       string
+	MainImage      string
+	Detail         string
+	ProductStatus  int32
+	SeckillPrice   uint64
+	MarketPrice    uint64
+	TotalStock     uint32
+	AvailableStock uint32
+	LimitNum       uint32
+	WarmUp         bool
+}
+
 // CreateOrderResult 创建订单结果
 type CreateOrderResult struct {
 	OrderNo          string

@@ -15,6 +15,8 @@ type SeckillRepo interface {
 
 	// 活动
 	GetCurrentActivity(ctx context.Context) (*Activity, int64, error)
+	UpdateSeckillActivity(ctx context.Context, req *UpdateActivityRequest) error
+	UpdateSeckillProduct(ctx context.Context, req *UpdateProductRequest) error
 
 	// 用户
 	CheckUserBuyRecord(ctx context.Context, userID, activityID uint64) (*UserBuyRecord, error)
@@ -66,6 +68,8 @@ type CacheRepo interface {
 	SetProductList(ctx context.Context, activityID int64, page, pageSize, sortType int32, data *SeckillProductsResult, ttl time.Duration) error
 	GetProductDetail(ctx context.Context, productID, activityID uint64) (*SeckillProductDetail, error)
 	SetProductDetail(ctx context.Context, productID, activityID uint64, detail *SeckillProductDetail, ttl time.Duration) error
+	DeleteProductDetail(ctx context.Context, productID, activityID uint64) error
+	DeleteProductLists(ctx context.Context, activityID uint64) error
 
 	// 布隆过滤器
 	BloomAdd(ctx context.Context, activityID, productID uint64) error
@@ -80,6 +84,7 @@ type CacheRepo interface {
 	// 活动缓存
 	GetCurrentActivity(ctx context.Context) (*Activity, error)
 	SetCurrentActivity(ctx context.Context, activity *Activity, ttl time.Duration) error
+	DeleteCurrentActivity(ctx context.Context) error
 
 	// 用户购买记录
 	CheckUserBuy(ctx context.Context, activityID, skuID, userID uint64) (bool, error)

@@ -119,6 +119,14 @@ func (t *CompensateTask) fixPendingReservations(ctx context.Context) {
 			continue
 		}
 
+		if pending.CouponID > 0 {
+			if err := t.mysql.RestoreUserCoupon(ctx, pending.CouponID); err != nil {
+				t.log.Warnf("pending restore user coupon failed: requestID=%s couponID=%d err=%v", pending.RequestID, pending.CouponID, err)
+				continue
+			}
+			_ = t.cache.DeleteCoupon(ctx, pending.CouponID)
+		}
+
 		_ = t.rdb.Del(ctx, key).Err()
 		t.log.Warnf("pending reservation compensated: requestID=%s orderNo=%s", pending.RequestID, pending.OrderNo)
 	}

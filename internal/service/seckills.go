@@ -507,6 +507,84 @@ func toProtoUserCoupon(coupon *biz.UserCoupon) *v1.UserCouponInfo {
 	}
 }
 
+func (s *SeckillService) UpdateSeckillActivity(ctx context.Context, req *v1.UpdateSeckillActivityRequest) (_ *v1.UpdateSeckillActivityReply, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "service.UpdateSeckillActivity")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("service", "UpdateSeckillActivity", result, start)
+	}()
+
+	if req.ActivityId == 0 {
+		return nil, status.Error(codes.InvalidArgument, "activity_id不能为空")
+	}
+	if err := s.uc.UpdateSeckillActivity(ctx, &biz.UpdateActivityRequest{
+		ActivityID:  uint64(req.ActivityId),
+		Title:       req.Title,
+		Description: req.Description,
+		StartTime:   req.StartTime,
+		EndTime:     req.EndTime,
+		Status:      req.Status,
+		WarmUp:      req.WarmUp,
+	}); err != nil {
+		return nil, mapCacheAsideUpdateError(err)
+	}
+	return &v1.UpdateSeckillActivityReply{Success: true, Message: "活动已更新，缓存已失效"}, nil
+}
+
+func (s *SeckillService) UpdateSeckillProduct(ctx context.Context, req *v1.UpdateSeckillProductRequest) (_ *v1.UpdateSeckillProductReply, err error) {
+	start := time.Now()
+	ctx, span := observability.Start(ctx, "service.UpdateSeckillProduct")
+	defer func() {
+		observability.Finish(span, err)
+		result := "success"
+		if err != nil {
+			result = "fail"
+		}
+		observability.ObserveOperation("service", "UpdateSeckillProduct", result, start)
+	}()
+
+	if req.ActivityId == 0 || req.ProductId == 0 {
+		return nil, status.Error(codes.InvalidArgument, "activity_id/product_id不能为空")
+	}
+	if req.ProductStatus <= 0 || req.SeckillPrice <= 0 || req.MarketPrice <= 0 || req.TotalStock <= 0 || req.AvailableStock < 0 || req.LimitNum <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "商品状态、价格、库存和限购参数不合法")
+	}
+	if err := s.uc.UpdateSeckillProduct(ctx, &biz.UpdateProductRequest{
+		ActivityID:     uint64(req.ActivityId),
+		ProductID:      uint64(req.ProductId),
+		Name:           req.Name,
+		Subtitle:       req.Subtitle,
+		MainImage:      req.MainImage,
+		Detail:         req.Detail,
+		ProductStatus:  req.ProductStatus,
+		SeckillPrice:   uint64(req.SeckillPrice),
+		MarketPrice:    uint64(req.MarketPrice),
+		TotalStock:     uint32(req.TotalStock),
+		AvailableStock: uint32(req.AvailableStock),
+		LimitNum:       uint32(req.LimitNum),
+		WarmUp:         req.WarmUp,
+	}); err != nil {
+		return nil, mapCacheAsideUpdateError(err)
+	}
+	return &v1.UpdateSeckillProductReply{Success: true, Message: "商品已更新，缓存已失效"}, nil
+}
+
+func mapCacheAsideUpdateError(err error) error {
+	switch {
+	case stderrors.Is(err, biz.ErrInvalidCacheAsideUpdate):
+		return status.Error(codes.InvalidArgument, err.Error())
+	case stderrors.Is(err, biz.ErrActivityNotFound), stderrors.Is(err, biz.ErrProductNotFound):
+		return status.Error(codes.NotFound, err.Error())
+	default:
+		return status.Error(codes.Internal, err.Error())
+	}
+}
+
 func mapPayCallbackError(err error) error {
 	switch {
 	case stderrors.Is(err, biz.ErrInvalidPaySign):

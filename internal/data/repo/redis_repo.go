@@ -167,6 +167,11 @@ func (r *redisRepo) SetProductList(ctx context.Context, activityID int64, page, 
 	return r.rdb.SetEX(ctx, key, jsonData, ttl).Err()
 }
 
+func (r *redisRepo) DeleteProductLists(ctx context.Context, activityID uint64) error {
+	pattern := fmt.Sprintf("seckill:act:%d:list:*", activityID)
+	return r.deleteByPattern(ctx, pattern)
+}
+
 // GetStock 获取库存
 func (r *redisRepo) GetStock(ctx context.Context, activityID, skuID uint64) (int64, error) {
 	key := fmt.Sprintf("seckill:act:%d:sku:%d:stock", activityID, skuID)
@@ -255,10 +260,19 @@ func (r *redisRepo) GetCurrentActivity(ctx context.Context) (res *biz.Activity, 
 		}(), start)
 	}()
 
-	key := "seckill:current:activity"
-	data, err := r.rdb.Get(ctx, key).Bytes()
-	if err != nil {
-		return nil, err
+	keys := []string{"seckill:activity:current", "seckill:current:activity"}
+	var data []byte
+	for _, key := range keys {
+		data, err = r.rdb.Get(ctx, key).Bytes()
+		if err == nil {
+			break
+		}
+		if err != redis.Nil {
+			return nil, err
+		}
+	}
+	if len(data) == 0 {
+		return nil, redis.Nil
 	}
 
 	var activity biz.Activity
@@ -282,12 +296,20 @@ func (r *redisRepo) SetCurrentActivity(ctx context.Context, activity *biz.Activi
 		}(), start)
 	}()
 
-	key := "seckill:current:activity"
 	data, err := json.Marshal(activity)
 	if err != nil {
 		return err
 	}
-	return r.rdb.SetEX(ctx, key, data, ttl).Err()
+	ttl = addRandomJitter(ttl)
+	pipe := r.rdb.Pipeline()
+	pipe.SetEX(ctx, "seckill:activity:current", data, ttl)
+	pipe.SetEX(ctx, "seckill:current:activity", data, ttl)
+	_, err = pipe.Exec(ctx)
+	return err
+}
+
+func (r *redisRepo) DeleteCurrentActivity(ctx context.Context) error {
+	return r.rdb.Del(ctx, "seckill:activity:current", "seckill:current:activity").Err()
 }
 
 // GetProductDetail 获取商品详情缓存
@@ -342,6 +364,13 @@ func (r *redisRepo) SetProductDetail(ctx context.Context, productID, activityID 
 	return r.rdb.SetEX(ctx, key, data, ttl).Err()
 }
 
+func (r *redisRepo) DeleteProductDetail(ctx context.Context, productID, activityID uint64) error {
+	return r.rdb.Del(ctx,
+		fmt.Sprintf("seckill:act:%d:product:%d:detail", activityID, productID),
+		fmt.Sprintf("seckill:product:%d:%d", productID, activityID),
+	).Err()
+}
+
 func bloomProductKey(activityID uint64) string {
 	return fmt.Sprintf("seckill:bloom:product:%d", activityID)
 }
@@ -391,6 +420,25 @@ func (r *redisRepo) Set(ctx context.Context, key string, value string, ttl time.
 // Del 通用删除缓存
 func (r *redisRepo) Del(ctx context.Context, keys ...string) error {
 	return r.rdb.Del(ctx, keys...).Err()
+}
+
+func (r *redisRepo) deleteByPattern(ctx context.Context, pattern string) error {
+	var cursor uint64
+	for {
+		keys, next, err := r.rdb.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			return err
+		}
+		if len(keys) > 0 {
+			if err := r.rdb.Del(ctx, keys...).Err(); err != nil {
+				return err
+			}
+		}
+		cursor = next
+		if cursor == 0 {
+			return nil
+		}
+	}
 }
 
 func (r *redisRepo) SetNX(ctx context.Context, key string, value interface{}, ttl time.Duration) (bool, error) {

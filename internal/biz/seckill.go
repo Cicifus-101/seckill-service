@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/go-kratos/kratos/v2/log"
+	"github.com/google/uuid"
 	"seckill-service/internal/observability"
 
 	"seckill-service/internal/mq"
@@ -210,7 +211,8 @@ func (uc *SeckillUsecase) getProductDetailWithMutex(ctx context.Context, product
 
 	// 3. 分布式锁防击穿
 	lockKey := fmt.Sprintf("lock:product:%d:%d", productID, activityID)
-	locked, err := uc.Cache.SetNX(ctx, lockKey, "1", 5*time.Second)
+	lockToken := uuid.NewString()
+	locked, err := uc.Cache.AcquireLock(ctx, lockKey, lockToken, 5*time.Second)
 	if err != nil {
 		detail, cacheErr := uc.Cache.GetProductDetail(ctx, productID, activityID)
 		if cacheErr == nil && detail != nil {
@@ -222,7 +224,7 @@ func (uc *SeckillUsecase) getProductDetailWithMutex(ctx context.Context, product
 	}
 
 	if locked {
-		defer uc.Cache.Del(ctx, lockKey)
+		defer uc.Cache.ReleaseLock(ctx, lockKey, lockToken)
 
 		// double check
 		detail, err = uc.Cache.GetProductDetail(ctx, productID, activityID)
@@ -393,6 +395,7 @@ func (uc *SeckillUsecase) CreateSeckillOrder(ctx context.Context, req *CreateOrd
 		ActivityID: msg.ActivityID,
 		SkuID:      msg.SkuID,
 		Quantity:   msg.Quantity,
+		CouponID:   msg.CouponID,
 		CreatedAt:  time.Now().Unix(),
 	}, 20*time.Minute)
 
@@ -581,14 +584,15 @@ func (uc *SeckillUsecase) getActivityFromCacheWithMutex(ctx context.Context) (*A
 
 	// 尝试获取分布式锁
 	lockKey := cacheKey + ":lock"
-	locked, err := uc.Cache.SetNX(ctx, lockKey, "1", 3*time.Second)
+	lockToken := uuid.NewString()
+	locked, err := uc.Cache.AcquireLock(ctx, lockKey, lockToken, 3*time.Second)
 	if err != nil {
 		activity, _, err := uc.Repo.GetCurrentActivity(ctx)
 		return activity, err
 	}
 
 	if locked {
-		defer uc.Cache.Del(ctx, lockKey)
+		defer uc.Cache.ReleaseLock(ctx, lockKey, lockToken)
 
 		// 双重检查
 		cachedData, err = uc.Cache.Get(ctx, cacheKey)
@@ -863,22 +867,72 @@ func (uc *SeckillUsecase) buildPayCallbackSign(req *PayCallbackRequest) string {
 
 // InvalidateProductCache 主动失效商品缓存（商品信息更新时调用）
 func (uc *SeckillUsecase) InvalidateProductCache(ctx context.Context, productID, activityID uint64) error {
-	cacheKey := fmt.Sprintf("seckill:product:%d:%d", productID, activityID)
-	if err := uc.Cache.Del(ctx, cacheKey); err != nil {
-		uc.log.WithContext(ctx).Warnf("删除商品缓存失败: key=%s, err=%v", cacheKey, err)
+	if err := uc.Cache.DeleteProductDetail(ctx, productID, activityID); err != nil {
+		uc.log.WithContext(ctx).Warnf("删除商品详情缓存失败: productID=%d activityID=%d err=%v", productID, activityID, err)
 		return err
 	}
-	uc.log.WithContext(ctx).Debugf("商品缓存已失效: productID=%d, activityID=%d", productID, activityID)
+	if err := uc.Cache.DeleteProductLists(ctx, activityID); err != nil {
+		uc.log.WithContext(ctx).Warnf("删除商品列表缓存失败: activityID=%d err=%v", activityID, err)
+		return err
+	}
+	uc.log.WithContext(ctx).Debugf("商品缓存已失效: productID=%d activityID=%d", productID, activityID)
 	return nil
 }
 
 // InvalidateActivityCache 主动失效活动缓存
 func (uc *SeckillUsecase) InvalidateActivityCache(ctx context.Context) error {
-	if err := uc.Cache.Del(ctx, cacheKeyActivity); err != nil {
+	if err := uc.Cache.DeleteCurrentActivity(ctx); err != nil {
 		uc.log.WithContext(ctx).Warnf("删除活动缓存失败: %v", err)
 		return err
 	}
 	uc.log.WithContext(ctx).Debug("活动缓存已失效")
+	return nil
+}
+
+func (uc *SeckillUsecase) UpdateSeckillActivity(ctx context.Context, req *UpdateActivityRequest) error {
+	if req == nil || req.ActivityID == 0 || req.Title == "" || req.StartTime == "" || req.EndTime == "" {
+		return ErrInvalidCacheAsideUpdate
+	}
+	if err := uc.Repo.UpdateSeckillActivity(ctx, req); err != nil {
+		return err
+	}
+
+	if err := uc.InvalidateActivityCache(ctx); err != nil {
+		return err
+	}
+	if err := uc.Cache.DeleteProductLists(ctx, req.ActivityID); err != nil {
+		uc.log.WithContext(ctx).Warnf("删除活动商品列表缓存失败: activityID=%d err=%v", req.ActivityID, err)
+		return err
+	}
+	if req.WarmUp {
+		return uc.WarmUpSeckillCache(ctx, req.ActivityID)
+	}
+	return nil
+}
+
+func (uc *SeckillUsecase) UpdateSeckillProduct(ctx context.Context, req *UpdateProductRequest) error {
+	if req == nil || req.ActivityID == 0 || req.ProductID == 0 || req.Name == "" ||
+		req.ProductStatus <= 0 || req.SeckillPrice == 0 || req.MarketPrice == 0 || req.TotalStock == 0 || req.LimitNum == 0 {
+		return ErrInvalidCacheAsideUpdate
+	}
+	if err := uc.Repo.UpdateSeckillProduct(ctx, req); err != nil {
+		return err
+	}
+
+	if err := uc.InvalidateProductCache(ctx, req.ProductID, req.ActivityID); err != nil {
+		return err
+	}
+	detail, err := uc.Repo.GetSeckillProductDetail(ctx, req.ProductID, req.ActivityID)
+	if err != nil {
+		return err
+	}
+	if err := uc.Cache.SetStock(ctx, req.ActivityID, detail.SkuID, int64(req.AvailableStock)); err != nil {
+		uc.log.WithContext(ctx).Warnf("同步 Redis 秒杀库存失败: activityID=%d skuID=%d err=%v", req.ActivityID, detail.SkuID, err)
+		return err
+	}
+	if req.WarmUp {
+		return uc.WarmUpSeckillCache(ctx, req.ActivityID)
+	}
 	return nil
 }
 

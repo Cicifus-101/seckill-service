@@ -244,6 +244,72 @@ func (r *mysqlRepo) GetCurrentActivity(ctx context.Context) (*biz.Activity, int6
 	}, count, nil
 }
 
+func (r *mysqlRepo) UpdateSeckillActivity(ctx context.Context, req *biz.UpdateActivityRequest) error {
+	startTime, err := time.Parse("2006-01-02 15:04:05", req.StartTime)
+	if err != nil {
+		return err
+	}
+	endTime, err := time.Parse("2006-01-02 15:04:05", req.EndTime)
+	if err != nil {
+		return err
+	}
+
+	info := r.data.GetCoreDB(ctx).Model(&coreModel.SeckillActivity{}).
+		Where("id = ?", req.ActivityID).
+		Updates(map[string]interface{}{
+			"title":       req.Title,
+			"description": req.Description,
+			"start_time":  startTime,
+			"end_time":    endTime,
+			"status":      req.Status,
+		})
+	if info.Error != nil {
+		return info.Error
+	}
+	if info.RowsAffected == 0 {
+		return biz.ErrActivityNotFound
+	}
+	return nil
+}
+
+func (r *mysqlRepo) UpdateSeckillProduct(ctx context.Context, req *biz.UpdateProductRequest) error {
+	productUpdates := map[string]interface{}{
+		"name":       req.Name,
+		"subtitle":   req.Subtitle,
+		"main_image": req.MainImage,
+		"detail":     req.Detail,
+		"status":     req.ProductStatus,
+	}
+	productInfo := r.data.GetProductDB(ctx).Model(&productModel.Product{}).
+		Where("id = ?", req.ProductID).
+		Updates(productUpdates)
+	if productInfo.Error != nil {
+		return productInfo.Error
+	}
+	if productInfo.RowsAffected == 0 {
+		return biz.ErrProductNotFound
+	}
+
+	limitNum := req.LimitNum
+	info := r.data.GetCoreDB(ctx).Model(&coreModel.SeckillSku{}).
+		Where("activity_id = ? AND product_id = ?", req.ActivityID, req.ProductID).
+		Updates(map[string]interface{}{
+			"seckill_price":   req.SeckillPrice,
+			"market_price":    req.MarketPrice,
+			"total_stock":     req.TotalStock,
+			"available_stock": req.AvailableStock,
+			"limit_num":       limitNum,
+			"version":         gorm.Expr("version + 1"),
+		})
+	if info.Error != nil {
+		return info.Error
+	}
+	if info.RowsAffected == 0 {
+		return biz.ErrProductNotFound
+	}
+	return nil
+}
+
 // CreatePayInfo 创建支付记录
 func (r *mysqlRepo) CreatePayInfo(ctx context.Context, payInfo *biz.PayInfo) error {
 	q := r.data.GetPayQuery(ctx)

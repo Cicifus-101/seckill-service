@@ -15,11 +15,11 @@ const (
 	UserCouponStatusExpired int32 = 3
 
 	// agent 用户画像和推荐系统
-	CouponSceneFirstReview           = "FIRST_REVIEW"
-	CouponSceneGoodReview            = "GOOD_REVIEW"
-	CouponScenePhotoReview           = "PHOTO_REVIEW"
-	CouponSceneInviteNew             = "INVITE_NEW"
-	CouponSceneAfterSaleCompensation = "AFTER_SALE_COMPENSATION"
+	CouponSceneFirstReview           = "FIRST_REVIEW"            // 首评送券
+	CouponSceneGoodReview            = "GOOD_REVIEW"             // 好评反券
+	CouponScenePhotoReview           = "PHOTO_REVIEW"            // 晒图返券
+	CouponSceneInviteNew             = "INVITE_NEW"              // 售后补偿券
+	CouponSceneAfterSaleCompensation = "AFTER_SALE_COMPENSATION" // 拉新券
 )
 
 // 发券规则配置

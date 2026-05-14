@@ -20,14 +20,16 @@ var (
 	ErrNoActiveActivity = errors.New("暂无进行中的秒杀活动")
 	ErrActivityNotStart = errors.New("活动尚未开始")
 	ErrActivityEnded    = errors.New("活动已结束")
+	ErrActivityNotFound = errors.New("活动不存在")
 )
 
 // 商品相关错误
 var (
-	ErrProductNotFound     = errors.New("商品不存在")
-	ErrInsufficientStock   = errors.New("库存不足")
-	ErrExceedLimit         = errors.New("超过限购数量")
-	ErrStockUpdateConflict = errors.New("库存更新冲突")
+	ErrProductNotFound         = errors.New("商品不存在")
+	ErrInsufficientStock       = errors.New("库存不足")
+	ErrExceedLimit             = errors.New("超过限购数量")
+	ErrStockUpdateConflict     = errors.New("库存更新冲突")
+	ErrInvalidCacheAsideUpdate = errors.New("缓存一致性更新参数无效")
 )
 
 // 订单相关错误

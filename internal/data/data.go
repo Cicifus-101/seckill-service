@@ -147,6 +147,10 @@ func (d *Data) GetCoreDB(ctx context.Context) *gorm.DB {
 	return d.coreDB.WithContext(ctx)
 }
 
+func (d *Data) GetProductDB(ctx context.Context) *gorm.DB {
+	return d.productDB.WithContext(ctx)
+}
+
 // GetCoreQueryForTx 用于事务中的查询（返回带上下文的查询）
 func (d *Data) GetCoreQueryForTx(ctx context.Context) interface{} {
 	if tx, ok := ctx.Value("tx").(*gorm.DB); ok {
