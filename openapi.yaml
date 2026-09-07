@@ -3,8 +3,567 @@
 
 openapi: 3.0.3
 info:
-    title: ""
+    title: Seckill API
     version: 0.0.1
-paths: {}
+paths:
+    /api/v1/seckill/activity/current:
+        get:
+            tags:
+                - Seckill
+            description: 秒杀活动信息
+            operationId: Seckill_GetCurrentActivity
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.seckill.v1.GetCurrentActivityResponse'
+    /api/v1/seckill/coupon/review/grant:
+        post:
+            tags:
+                - Seckill
+            description: 评价/业务侧触发发券，供 review-service gRPC 联调
+            operationId: Seckill_GrantCouponByReview
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.seckill.v1.GrantCouponByReviewRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.seckill.v1.GrantCouponByReviewReply'
+    /api/v1/seckill/result:
+        get:
+            tags:
+                - Seckill
+            description: 查询秒杀结果
+            operationId: Seckill_GetSeckillResult
+            parameters:
+                - name: userId
+                  in: query
+                  schema:
+                    type: string
+                - name: requestId
+                  in: query
+                  schema:
+                    type: string
+                - name: activityId
+                  in: query
+                  schema:
+                    type: string
+                - name: productId
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.seckill.v1.GetSeckillResultResponse'
+    /seckill/order:
+        post:
+            tags:
+                - Seckill
+            description: 秒杀下单（核心高并发接口）
+            operationId: Seckill_CreateSeckillOrder
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.seckill.v1.CreateSeckillOrderRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.seckill.v1.CreateSeckillOrderResponse'
+    /seckill/order/pay:
+        post:
+            tags:
+                - Seckill
+            description: 支付秒杀订单
+            operationId: Seckill_PaySeckillOrder
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.seckill.v1.PaySeckillOrderRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.seckill.v1.PaySeckillOrderResponse'
+    /seckill/order/{orderNo}:
+        get:
+            tags:
+                - Seckill
+            description: 查询秒杀订单
+            operationId: Seckill_GetSeckillOrder
+            parameters:
+                - name: orderNo
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: userId
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.seckill.v1.GetSeckillOrderResponse'
+    /seckill/product/{productId}:
+        get:
+            tags:
+                - Seckill
+            description: 查询秒杀商品详情
+            operationId: Seckill_SeckillProductDetail
+            parameters:
+                - name: productId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: userId
+                  in: query
+                  schema:
+                    type: string
+                - name: activityId
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.seckill.v1.SeckillProductDetailResponse'
+    /seckill/products:
+        get:
+            tags:
+                - Seckill
+            description: 查询秒杀商品列表
+            operationId: Seckill_SeckillProducts
+            parameters:
+                - name: userId
+                  in: query
+                  schema:
+                    type: string
+                - name: activityId
+                  in: query
+                  schema:
+                    type: string
+                - name: page
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: sortType
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.seckill.v1.SeckillProductsResponse'
 components:
-    schemas: {}
+    schemas:
+        api.seckill.v1.ActivityInfo:
+            type: object
+            properties:
+                id:
+                    type: string
+                title:
+                    type: string
+                description:
+                    type: string
+                startTime:
+                    type: string
+                endTime:
+                    type: string
+                status:
+                    type: integer
+                    format: int32
+                remainingSeconds:
+                    type: string
+            description: 活动概要
+        api.seckill.v1.AddressSnapshot:
+            type: object
+            properties:
+                id:
+                    type: string
+                receiverName:
+                    type: string
+                receiverPhone:
+                    type: string
+                province:
+                    type: string
+                city:
+                    type: string
+                district:
+                    type: string
+                detailAddress:
+                    type: string
+            description: 收货地址
+        api.seckill.v1.CouponInfo:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                type:
+                    type: integer
+                    format: int32
+                value:
+                    type: string
+                minAmount:
+                    type: string
+                endTime:
+                    type: string
+                isUsable:
+                    type: boolean
+            description: |-
+                ------------3.秒杀下单-----------
+                 优惠券简略信息（从优惠券服务获取）
+        api.seckill.v1.CreateSeckillOrderRequest:
+            type: object
+            properties:
+                userId:
+                    type: string
+                skuId:
+                    type: string
+                activityId:
+                    type: string
+                productId:
+                    type: string
+                quantity:
+                    type: string
+                couponId:
+                    type: string
+                addressId:
+                    type: string
+                clientIp:
+                    type: string
+                requestId:
+                    type: string
+            description: 创建秒杀订单（核心接口）
+        api.seckill.v1.CreateSeckillOrderResponse:
+            type: object
+            properties:
+                orderNo:
+                    type: string
+                orderAmount:
+                    type: string
+                couponDiscount:
+                    type: string
+                finalAmount:
+                    type: string
+                status:
+                    type: integer
+                    format: int32
+                seckillPrice:
+                    type: string
+                quantity:
+                    type: string
+                message:
+                    type: string
+                remainingSeconds:
+                    type: string
+        api.seckill.v1.GetCurrentActivityResponse:
+            type: object
+            properties:
+                activity:
+                    $ref: '#/components/schemas/api.seckill.v1.ActivityInfo'
+                productCount:
+                    type: string
+        api.seckill.v1.GetSeckillOrderResponse:
+            type: object
+            properties:
+                order:
+                    $ref: '#/components/schemas/api.seckill.v1.SeckillOrderInfo'
+        api.seckill.v1.GetSeckillResultResponse:
+            type: object
+            properties:
+                status:
+                    type: integer
+                    format: int32
+                orderNo:
+                    type: string
+                message:
+                    type: string
+                orderAmount:
+                    type: string
+        api.seckill.v1.GrantCouponByReviewReply:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                coupon:
+                    $ref: '#/components/schemas/api.seckill.v1.UserCouponInfo'
+                duplicated:
+                    type: boolean
+        api.seckill.v1.GrantCouponByReviewRequest:
+            type: object
+            properties:
+                userId:
+                    type: string
+                reviewId:
+                    type: string
+                orderNo:
+                    type: string
+                productId:
+                    type: string
+                rating:
+                    type: integer
+                    format: int32
+                hasImage:
+                    type: boolean
+                isFirstReview:
+                    type: boolean
+                scene:
+                    type: string
+                idempotencyKey:
+                    type: string
+                storeId:
+                    type: string
+                activityId:
+                    type: string
+                policyVersion:
+                    type: string
+                evidenceVersion:
+                    type: string
+                couponTemplateId:
+                    type: string
+        api.seckill.v1.PaySeckillOrderRequest:
+            type: object
+            properties:
+                orderNo:
+                    type: string
+                userId:
+                    type: string
+                payPlatform:
+                    type: integer
+                    format: int32
+            description: 支付订单
+        api.seckill.v1.PaySeckillOrderResponse:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                payUrl:
+                    type: string
+                payAmount:
+                    type: string
+                platformNumber:
+                    type: string
+        api.seckill.v1.ProductDetail:
+            type: object
+            properties:
+                productId:
+                    type: string
+                    description: 商品基础信息（Product）
+                name:
+                    type: string
+                subtitle:
+                    type: string
+                mainImage:
+                    type: string
+                detail:
+                    type: string
+                skuId:
+                    type: string
+                    description: 秒杀信息（seckill_sku)
+                seckillPrice:
+                    type: string
+                marketPrice:
+                    type: string
+                totalStock:
+                    type: string
+                availableStock:
+                    type: string
+                limitNum:
+                    type: string
+                activityId:
+                    type: string
+                    description: 活动信息(seckill_activity)
+                activityTitle:
+                    type: string
+                activityDescription:
+                    type: string
+                startTime:
+                    type: string
+                endTime:
+                    type: string
+                activityStatus:
+                    type: string
+                remainingSeconds:
+                    type: string
+        api.seckill.v1.ProductInfo:
+            type: object
+            properties:
+                skuId:
+                    type: string
+                productId:
+                    type: string
+                name:
+                    type: string
+                mainImage:
+                    type: string
+                seckillPrice:
+                    type: string
+                marketPrice:
+                    type: string
+                availableStock:
+                    type: string
+                totalStock:
+                    type: string
+                limitNum:
+                    type: string
+                saleRate:
+                    type: string
+                userHasBought:
+                    type: boolean
+        api.seckill.v1.SeckillOrderInfo:
+            type: object
+            properties:
+                orderNo:
+                    type: string
+                userId:
+                    type: string
+                activityId:
+                    type: string
+                productId:
+                    type: string
+                skuId:
+                    type: string
+                productName:
+                    type: string
+                productImage:
+                    type: string
+                seckillPrice:
+                    type: string
+                quantity:
+                    type: string
+                orderAmount:
+                    type: string
+                couponId:
+                    type: string
+                couponDiscount:
+                    type: string
+                finalAmount:
+                    type: string
+                status:
+                    type: integer
+                    format: int32
+                createTime:
+                    type: string
+                payTime:
+                    type: string
+                address:
+                    $ref: '#/components/schemas/api.seckill.v1.AddressSnapshot'
+                RemainingSeconds:
+                    type: string
+            description: 秒杀订单信息
+        api.seckill.v1.SeckillProductDetailResponse:
+            type: object
+            properties:
+                product:
+                    $ref: '#/components/schemas/api.seckill.v1.ProductDetail'
+                availableCoupons:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.seckill.v1.CouponInfo'
+                userStatus:
+                    $ref: '#/components/schemas/api.seckill.v1.UserSeckillStatus'
+        api.seckill.v1.SeckillProductsResponse:
+            type: object
+            properties:
+                products:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.seckill.v1.ProductInfo'
+                total:
+                    type: string
+                page:
+                    type: integer
+                    format: int32
+                pageSize:
+                    type: integer
+                    format: int32
+                activity:
+                    $ref: '#/components/schemas/api.seckill.v1.ActivityInfo'
+        api.seckill.v1.UserCouponInfo:
+            type: object
+            properties:
+                id:
+                    type: string
+                couponId:
+                    type: string
+                name:
+                    type: string
+                type:
+                    type: integer
+                    format: int32
+                value:
+                    type: string
+                minAmount:
+                    type: string
+                scene:
+                    type: string
+                status:
+                    type: integer
+                    format: int32
+                receivedTime:
+                    type: string
+                usedTime:
+                    type: string
+                expireTime:
+                    type: string
+        api.seckill.v1.UserSeckillStatus:
+            type: object
+            properties:
+                hasBought:
+                    type: boolean
+                boughtQuantity:
+                    type: string
+                canBuy:
+                    type: boolean
+                remainingLimit:
+                    type: string
+                message:
+                    type: string
+            description: 用户秒杀状态
+tags:
+    - name: Seckill

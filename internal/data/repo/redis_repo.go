@@ -38,6 +38,18 @@ end
 return 0
 `)
 
+// rollbackStockScript makes inventory compensation idempotent. The marker
+// and INCRBY happen in one Redis script, so a redelivered message cannot
+// increase the same stock twice.
+var rollbackStockScript = redis.NewScript(`
+if redis.call('EXISTS', KEYS[2]) == 1 then
+    return 0
+end
+redis.call('SET', KEYS[2], '1', 'EX', ARGV[2])
+redis.call('INCRBY', KEYS[1], ARGV[1])
+return 1
+`)
+
 type redisRepo struct {
 	rdb       *redis.Client
 	luaScript *redis.Script
@@ -210,7 +222,7 @@ func (r *redisRepo) DeductStock(ctx context.Context, activityID, skuID, userID u
 }
 
 // RollbackStock 回滚库存
-func (r *redisRepo) RollbackStock(ctx context.Context, activityID, skuID uint64, quantity int) (err error) {
+func (r *redisRepo) RollbackStock(ctx context.Context, activityID, skuID uint64, quantity int, rollbackID string) (err error) {
 	start := time.Now()
 	ctx, span := observability.Start(ctx, "repo.redis.RollbackStock")
 	defer func() {
@@ -224,7 +236,12 @@ func (r *redisRepo) RollbackStock(ctx context.Context, activityID, skuID uint64,
 	}()
 
 	key := fmt.Sprintf("seckill:act:%d:sku:%d:stock", activityID, skuID)
-	return r.rdb.IncrBy(ctx, key, int64(quantity)).Err()
+	if rollbackID == "" {
+		return fmt.Errorf("rollback id is required")
+	}
+	rollbackKey := fmt.Sprintf("seckill:rollback:%s", rollbackID)
+	_, err = rollbackStockScript.Run(ctx, r.rdb, []string{key, rollbackKey}, quantity, 7*24*60*60).Int()
+	return err
 }
 
 // CheckUserBuy 检查用户购买

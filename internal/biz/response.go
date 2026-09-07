@@ -41,15 +41,20 @@ type CreateOrderRequest struct {
 }
 
 type GrantCouponRequest struct {
-	UserID         uint64
-	ReviewID       uint64
-	OrderNo        string
-	ProductID      uint64
-	Rating         int32
-	HasImage       bool
-	IsFirstReview  bool
-	Scene          string
-	IdempotencyKey string
+	StoreID          uint64
+	UserID           uint64
+	ReviewID         uint64
+	OrderNo          string
+	ProductID        uint64
+	Rating           int32
+	HasImage         bool
+	IsFirstReview    bool
+	Scene            string
+	ActivityID       string
+	PolicyVersion    string
+	EvidenceVersion  int64
+	CouponTemplateID string
+	IdempotencyKey   string
 }
 
 type GrantCouponResult struct {

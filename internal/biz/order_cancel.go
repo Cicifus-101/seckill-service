@@ -62,7 +62,7 @@ func (s *OrderCancelService) CancelTimeoutOrder(ctx context.Context, orderNo str
 		return nil
 	}
 
-	if err := s.cache.RollbackStock(ctx, order.ActivityID, order.SkuID, int(order.Quantity)); err != nil {
+	if err := s.cache.RollbackStock(ctx, order.ActivityID, order.SkuID, int(order.Quantity), order.OrderNo); err != nil {
 		s.log.WithContext(ctx).Warnf("恢复 Redis 库存失败，等待库存补偿: orderNo=%s err=%v", orderNo, err)
 	}
 

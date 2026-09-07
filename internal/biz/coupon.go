@@ -40,8 +40,18 @@ func (uc *SeckillUsecase) GrantCouponByReview(ctx context.Context, req *GrantCou
 		return nil, err
 	}
 	req.Scene = scene
-	if req.IdempotencyKey == "" {
-		req.IdempotencyKey = fmt.Sprintf("review:%d:%s", req.ReviewID, scene)
+	if req.ReviewID > 0 {
+		if req.StoreID == 0 {
+			return nil, ErrCouponSceneInvalid
+		}
+		canonicalKey := fmt.Sprintf("review:store:%d:review:%d", req.StoreID, req.ReviewID)
+		if strings.TrimSpace(req.IdempotencyKey) == "" {
+			req.IdempotencyKey = canonicalKey
+		} else if strings.TrimSpace(req.IdempotencyKey) != canonicalKey {
+			return nil, ErrCouponSceneInvalid
+		}
+	} else if req.IdempotencyKey == "" {
+		req.IdempotencyKey = fmt.Sprintf("scene:%s:user:%d", scene, req.UserID)
 	}
 
 	template, ok := couponTemplateByScene(scene)

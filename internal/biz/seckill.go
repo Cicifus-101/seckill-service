@@ -58,6 +58,7 @@ type SeckillUsecase struct {
 	Cache      CacheRepo
 	MQ         MQProducer
 	Limiter    RateLimiter
+	Redis      RedisAvailability
 	Idempotent IdempotentChecker
 	DelayQueue DelayQueue
 	Canceler   *OrderCancelService
@@ -67,13 +68,14 @@ type SeckillUsecase struct {
 }
 
 func NewSeckillUsecase(repo SeckillRepo, cache CacheRepo, mq MQProducer,
-	limiter RateLimiter, idempotent IdempotentChecker, delayQueue DelayQueue, canceler *OrderCancelService,
+	limiter RateLimiter, redisAvailability RedisAvailability, idempotent IdempotentChecker, delayQueue DelayQueue, canceler *OrderCancelService,
 	idGen IDGenerator, logger log.Logger, tx Transaction) *SeckillUsecase {
 	return &SeckillUsecase{
 		Repo:       repo,
 		Cache:      cache,
 		MQ:         mq,
 		Limiter:    limiter,
+		Redis:      redisAvailability,
 		Idempotent: idempotent,
 		DelayQueue: delayQueue,
 		Canceler:   canceler,
@@ -265,21 +267,36 @@ func (uc *SeckillUsecase) CreateSeckillOrder(ctx context.Context, req *CreateOrd
 		observability.ObserveOperation("biz", "CreateSeckillOrder", result, start)
 	}()
 
+	if uc.Redis != nil {
+		if err := uc.Redis.Allow(ctx); err != nil {
+			return nil, ErrSystemBusy
+		}
+	}
+
 	// 全局限流
 	allowed, err := uc.Limiter.GlobalRateLimit(ctx, 10000, 20000, time.Second)
 	if err != nil || !allowed {
+		if err != nil && uc.Redis != nil {
+			uc.Redis.RecordFailure()
+		}
 		return nil, ErrSystemBusy
 	}
 
 	// 用户限流（防止单个用户刷单）
 	allowed, err = uc.Limiter.UserRateLimit(ctx, req.UserID, 3, 3, time.Second)
 	if err != nil || !allowed {
+		if err != nil && uc.Redis != nil {
+			uc.Redis.RecordFailure()
+		}
 		return nil, ErrTooManyRequests
 	}
 
 	// 2.1 请求幂等检查（防止重复提交）
 	isFirst, err := uc.Idempotent.CheckAndMark(ctx, req.RequestID, 5*time.Minute)
 	if err != nil || !isFirst {
+		if err != nil && uc.Redis != nil {
+			uc.Redis.RecordFailure()
+		}
 		return nil, ErrDuplicateRequest
 	}
 
@@ -294,6 +311,9 @@ func (uc *SeckillUsecase) CreateSeckillOrder(ctx context.Context, req *CreateOrd
 
 	allowed, err = uc.Limiter.ActivityRateLimit(ctx, activity.ID, 8000, 0, time.Second)
 	if err != nil || !allowed {
+		if err != nil && uc.Redis != nil {
+			uc.Redis.RecordFailure()
+		}
 		return nil, ErrSystemBusy
 	}
 
@@ -335,8 +355,14 @@ func (uc *SeckillUsecase) CreateSeckillOrder(ctx context.Context, req *CreateOrd
 	// 5.1 原子扣减redis库存
 	result, err := uc.Cache.DeductStock(ctx, req.ActivityID, req.SkuID, req.UserID, int(req.Quantity))
 	if err != nil {
+		if uc.Redis != nil {
+			uc.Redis.RecordFailure()
+		}
 		uc.log.WithContext(ctx).Errorf("Redis扣库存失败: %v", err)
 		return nil, err
+	}
+	if uc.Redis != nil {
+		uc.Redis.RecordSuccess()
 	}
 	switch result {
 	case -1:
@@ -397,20 +423,41 @@ func (uc *SeckillUsecase) CreateSeckillOrder(ctx context.Context, req *CreateOrd
 		Quantity:   msg.Quantity,
 		CouponID:   msg.CouponID,
 		CreatedAt:  time.Now().Unix(),
-	}, 20*time.Minute)
+	}, 1*time.Hour)
 
 	// 6.2 发送 MQ 消息
 	if err := uc.MQ.Send(ctx, msg); err != nil {
-		_ = uc.Cache.DeletePendingReservation(ctx, msg.RequestID)
-
 		// 发送失败，回滚 Redis 库存
 		uc.log.WithContext(ctx).Errorf("发送MQ消息失败: %v", err)
-		_ = uc.Cache.RollbackStock(ctx, req.ActivityID, req.SkuID, int(req.Quantity))
-		_ = uc.Cache.RemoveUserBuy(ctx, req.ActivityID, req.SkuID, req.UserID)
+		var rollbackErrs []error
+		if rollbackErr := uc.Cache.RollbackStock(ctx, req.ActivityID, req.SkuID, int(req.Quantity), msg.RequestID); rollbackErr != nil {
+			rollbackErrs = append(rollbackErrs, rollbackErr)
+		}
+		if removeErr := uc.Cache.RemoveUserBuy(ctx, req.ActivityID, req.SkuID, req.UserID); removeErr != nil {
+			rollbackErrs = append(rollbackErrs, removeErr)
+		}
 
 		if req.CouponID > 0 {
-			_ = uc.Repo.RestoreUserCoupon(ctx, req.CouponID)
-			_ = uc.Cache.DeleteCoupon(ctx, req.CouponID)
+			if restoreErr := uc.Repo.RestoreUserCoupon(ctx, req.CouponID); restoreErr != nil {
+				rollbackErrs = append(rollbackErrs, restoreErr)
+			}
+			if deleteErr := uc.Cache.DeleteCoupon(ctx, req.CouponID); deleteErr != nil {
+				rollbackErrs = append(rollbackErrs, deleteErr)
+			}
+		}
+
+		// Keep pending as a repair clue until every compensating action succeeds.
+		// Deleting it first would make a later Redis failure unrecoverable by the
+		// pending-reconciliation job.
+		if len(rollbackErrs) == 0 {
+			if deleteErr := uc.Cache.DeletePendingReservation(ctx, msg.RequestID); deleteErr != nil {
+				uc.log.WithContext(ctx).Warnf("删除pending失败，将由补偿任务处理: requestID=%s err=%v", msg.RequestID, deleteErr)
+			}
+		} else {
+			if uc.Redis != nil {
+				uc.Redis.RecordFailure()
+			}
+			uc.log.WithContext(ctx).Errorf("消息发送失败但资源回滚未完成，保留pending: requestID=%s err=%v", msg.RequestID, errors.Join(rollbackErrs...))
 		}
 
 		return nil, err
@@ -438,7 +485,7 @@ func (uc *SeckillUsecase) RollbackSeckillReservation(ctx context.Context, msg *m
 		return errors.New("order message is nil")
 	}
 
-	if err := uc.Cache.RollbackStock(ctx, msg.ActivityID, msg.SkuID, msg.Quantity); err != nil {
+	if err := uc.Cache.RollbackStock(ctx, msg.ActivityID, msg.SkuID, msg.Quantity, msg.RequestID); err != nil {
 		return err
 	}
 

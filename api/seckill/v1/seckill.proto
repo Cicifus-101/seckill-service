@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package api.seckill.v1;
 
+import "google/api/annotations.proto";
 
 option go_package = "seckill-service/api/seckill/v1;v1";
 option java_multiple_files = true;
@@ -10,39 +11,53 @@ option java_package = "api.seckill.v1";
 service Seckill{
   // 查询秒杀商品列表
   rpc SeckillProducts (SeckillProductsRequest) returns (SeckillProductsResponse) {
-    /*option (google.api.http) = {
+    option (google.api.http) = {
       get: "/seckill/products"
-    };*/
+    };
   }
 
   // 查询秒杀商品详情
   rpc SeckillProductDetail (SeckillProductDetailRequest) returns (SeckillProductDetailResponse) {
-   /* option (google.api.http) = {
+    option (google.api.http) = {
       get: "/seckill/product/{product_id}"
-    };*/
+    };
   }
 
   // 秒杀活动信息
   rpc GetCurrentActivity (GetCurrentActivityRequest) returns (GetCurrentActivityResponse) {
-   /* option (google.api.http) = {
+    option (google.api.http) = {
       get: "/api/v1/seckill/activity/current"
-    };*/
+    };
   }
 
   // 秒杀下单（核心高并发接口）
   rpc CreateSeckillOrder (CreateSeckillOrderRequest) returns (CreateSeckillOrderResponse) {
+    option (google.api.http) = {
+      post: "/seckill/order"
+      body: "*"
+    };
   }
 
   // 查询秒杀订单
   rpc GetSeckillOrder (GetSeckillOrderRequest) returns (GetSeckillOrderResponse) {
+    option (google.api.http) = {
+      get: "/seckill/order/{order_no}"
+    };
   }
 
   // 查询秒杀结果
   rpc GetSeckillResult (GetSeckillResultRequest) returns (GetSeckillResultResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/seckill/result"
+    };
   }
 
   // 支付秒杀订单
   rpc PaySeckillOrder (PaySeckillOrderRequest) returns (PaySeckillOrderResponse) {
+    option (google.api.http) = {
+      post: "/seckill/order/pay"
+      body: "*"
+    };
   }
 
   // 支付回调
@@ -51,6 +66,10 @@ service Seckill{
 
   // 评价/业务侧触发发券，供 review-service gRPC 联调
   rpc GrantCouponByReview(GrantCouponByReviewRequest) returns (GrantCouponByReviewReply) {
+    option (google.api.http) = {
+      post: "/api/v1/seckill/coupon/review/grant"
+      body: "*"
+    };
   }
 
   // 查询用户已领取的优惠券
@@ -318,7 +337,12 @@ message GrantCouponByReviewRequest {
   bool has_image = 6;
   bool is_first_review = 7;  // FIRST_REVIEW > PHOTO_REVIEW > GOOD_REVIEW 鼓励完成评价
   string scene = 8;          // FIRST_REVIEW/GOOD_REVIEW/PHOTO_REVIEW/INVITE_NEW/AFTER_SALE_COMPENSATION，可为空自动判断
-  string idempotency_key = 9; // 评价服务侧幂等键，建议 review:{review_id}:{scene} （防止agent重复调用）
+  string idempotency_key = 9; // 发券幂等键：review:store:{store_id}:review:{review_id}
+  int64 store_id = 10;
+  string activity_id = 11;
+  string policy_version = 12;
+  int64 evidence_version = 13;
+  string coupon_template_id = 14;
 }
 
 message GrantCouponByReviewReply {

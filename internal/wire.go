@@ -23,9 +23,11 @@ var ProviderSet = wire.NewSet(
 
 	// 缓存层
 	cache.NewRateLimiter,
+	cache.NewRedisGuard,
 	cache.NewIdempotentChecker,
 
 	wire.Bind(new(biz.RateLimiter), new(*cache.RateLimiter)),
+	wire.Bind(new(biz.RedisAvailability), new(*cache.RedisGuard)),
 	wire.Bind(new(biz.IdempotentChecker), new(*cache.IdempotentChecker)),
 
 	biz.NewOrderCancelService,

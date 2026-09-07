@@ -41,12 +41,13 @@ func wireApp(s *conf.Server, d *conf.Data, k *conf.Kafka, logger log.Logger) (*k
 		return nil, nil, err
 	}
 	rateLimiter := cache.NewRateLimiter(client)
+	redisGuard := cache.NewRedisGuard(client)
 	idempotentChecker := cache.NewIdempotentChecker(client)
 	transaction := data.NewTransaction(dataData, logger)
 	orderCancelService := biz.NewOrderCancelService(seckillRepo, cacheRepo, transaction, logger)
 	delayQueue := job.NewDelayQueue(client, seckillRepo, cacheRepo, orderCancelService, logger)
 	idGenerator := biz.NewIDGenerator(logger)
-	seckillUsecase := biz.NewSeckillUsecase(seckillRepo, cacheRepo, producer, rateLimiter, idempotentChecker, delayQueue, orderCancelService, idGenerator, logger, transaction)
+	seckillUsecase := biz.NewSeckillUsecase(seckillRepo, cacheRepo, producer, rateLimiter, redisGuard, idempotentChecker, delayQueue, orderCancelService, idGenerator, logger, transaction)
 	seckillService := service.NewSeckillService(seckillUsecase, logger)
 	grpcServer := server.NewGRPCServer(s, seckillService, logger)
 	httpServer := server.NewHTTPServer(s, seckillService, logger)
@@ -58,7 +59,7 @@ func wireApp(s *conf.Server, d *conf.Data, k *conf.Kafka, logger log.Logger) (*k
 	if err != nil {
 		return nil, nil, err
 	}
-	compensateTask := job.NewCompensateTask(client, seckillRepo, cacheRepo, logger)
+	compensateTask := job.NewCompensateTask(client, seckillRepo, cacheRepo, orderCancelService, logger)
 	backgroundTasks := NewBackgroundTasks(consumer, dlqConsumer, delayQueue, compensateTask, seckillUsecase)
 	app := newApp(logger, grpcServer, httpServer, backgroundTasks)
 	return app, func() {

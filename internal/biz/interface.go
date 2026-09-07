@@ -79,7 +79,7 @@ type CacheRepo interface {
 	GetStock(ctx context.Context, activityID, skuID uint64) (int64, error)
 	SetStock(ctx context.Context, activityID, skuID uint64, stock int64) error
 	DeductStock(ctx context.Context, activityID, skuID, userID uint64, quantity int) (int, error)
-	RollbackStock(ctx context.Context, activityID, skuID uint64, quantity int) error // 下单失败、订单超时
+	RollbackStock(ctx context.Context, activityID, skuID uint64, quantity int, rollbackID string) error // 下单失败、订单超时；同一rollbackID只执行一次
 
 	// 活动缓存
 	GetCurrentActivity(ctx context.Context) (*Activity, error)
@@ -131,6 +131,15 @@ type RateLimiter interface {
 	UserRateLimit(ctx context.Context, userID uint64, limit, burst int, window time.Duration) (bool, error)
 	GlobalRateLimit(ctx context.Context, limit, burst int, window time.Duration) (bool, error)
 	ActivityRateLimit(ctx context.Context, activityID uint64, limit, burst int, window time.Duration) (bool, error)
+}
+
+// RedisAvailability protects critical paths from Redis outages. The
+// implementation must fail closed; MySQL is not a safe fallback for seckill
+// stock deduction under high concurrency.
+type RedisAvailability interface {
+	Allow(ctx context.Context) error
+	RecordFailure()
+	RecordSuccess()
 }
 
 // IdempotentChecker 幂等检查器接口

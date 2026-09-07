@@ -422,17 +422,25 @@ func (s *SeckillService) GrantCouponByReview(ctx context.Context, req *v1.GrantC
 	if req.ReviewId == 0 && scene != biz.CouponSceneInviteNew && scene != biz.CouponSceneAfterSaleCompensation {
 		return nil, status.Error(codes.InvalidArgument, "review_id不能为空")
 	}
+	if req.ReviewId > 0 && req.StoreId == 0 {
+		return nil, status.Error(codes.InvalidArgument, "store_id不能为空")
+	}
 
 	res, err := s.uc.GrantCouponByReview(ctx, &biz.GrantCouponRequest{
-		UserID:         uint64(req.UserId),
-		ReviewID:       uint64(req.ReviewId),
-		OrderNo:        req.OrderNo,
-		ProductID:      uint64(req.ProductId),
-		Rating:         req.Rating,
-		HasImage:       req.HasImage,
-		IsFirstReview:  req.IsFirstReview,
-		Scene:          scene,
-		IdempotencyKey: req.IdempotencyKey,
+		StoreID:          uint64(req.StoreId),
+		UserID:           uint64(req.UserId),
+		ReviewID:         uint64(req.ReviewId),
+		OrderNo:          req.OrderNo,
+		ProductID:        uint64(req.ProductId),
+		Rating:           req.Rating,
+		HasImage:         req.HasImage,
+		IsFirstReview:    req.IsFirstReview,
+		Scene:            scene,
+		ActivityID:       strings.TrimSpace(req.ActivityId),
+		PolicyVersion:    strings.TrimSpace(req.PolicyVersion),
+		EvidenceVersion:  req.EvidenceVersion,
+		CouponTemplateID: strings.TrimSpace(req.CouponTemplateId),
+		IdempotencyKey:   req.IdempotencyKey,
 	})
 	if err != nil {
 		switch {

@@ -13,18 +13,20 @@ import (
 
 // CompensateTask 补偿任务
 type CompensateTask struct {
-	rdb   *redis.Client
-	mysql biz.SeckillRepo
-	cache biz.CacheRepo
-	log   *log.Helper
+	rdb      *redis.Client
+	mysql    biz.SeckillRepo
+	cache    biz.CacheRepo
+	canceler *biz.OrderCancelService
+	log      *log.Helper
 }
 
-func NewCompensateTask(rdb *redis.Client, mysql biz.SeckillRepo, cache biz.CacheRepo, logger log.Logger) *CompensateTask {
+func NewCompensateTask(rdb *redis.Client, mysql biz.SeckillRepo, cache biz.CacheRepo, canceler *biz.OrderCancelService, logger log.Logger) *CompensateTask {
 	return &CompensateTask{
-		rdb:   rdb,
-		mysql: mysql,
-		cache: cache,
-		log:   log.NewHelper(log.With(logger, "module", "job/compensate")),
+		rdb:      rdb,
+		mysql:    mysql,
+		cache:    cache,
+		canceler: canceler,
+		log:      log.NewHelper(log.With(logger, "module", "job/compensate")),
 	}
 }
 
@@ -43,6 +45,7 @@ func (t *CompensateTask) Start(ctx context.Context) {
 			case <-ticker.C:
 				t.syncStockConsistency(runCtx)
 				t.fixPendingReservations(runCtx)
+				t.fixTimeoutOrders(runCtx)
 			}
 		}
 	})
@@ -94,7 +97,10 @@ func (t *CompensateTask) fixPendingReservations(ctx context.Context) {
 			continue
 		}
 
-		if time.Since(time.Unix(pending.CreatedAt, 0)) < 2*time.Minute {
+		// Keep this window longer than Kafka's normal retry/consumer recovery
+		// time. A short window could roll back Redis while the original message
+		// is still waiting in Kafka and later create a valid order.
+		if time.Since(time.Unix(pending.CreatedAt, 0)) < 20*time.Minute {
 			continue
 		}
 
@@ -109,7 +115,7 @@ func (t *CompensateTask) fixPendingReservations(ctx context.Context) {
 			continue
 		}
 
-		if err := t.cache.RollbackStock(ctx, pending.ActivityID, pending.SkuID, pending.Quantity); err != nil {
+		if err := t.cache.RollbackStock(ctx, pending.ActivityID, pending.SkuID, pending.Quantity, pending.RequestID); err != nil {
 			t.log.Warnf("pending rollback stock failed: requestID=%s err=%v", pending.RequestID, err)
 			continue
 		}
@@ -133,5 +139,24 @@ func (t *CompensateTask) fixPendingReservations(ctx context.Context) {
 
 	if err := iter.Err(); err != nil {
 		t.log.Warnf("scan pending reservations failed: %v", err)
+	}
+}
+
+// fixTimeoutOrders is the database safety net for a Redis delay-queue task
+// that was never inserted, expired, or lost during Redis failure. The order
+// lock inside CancelTimeoutOrder makes this safe to run alongside DelayQueue.
+func (t *CompensateTask) fixTimeoutOrders(ctx context.Context) {
+	if t.canceler == nil {
+		return
+	}
+	orders, err := t.mysql.GetPendingOrders(ctx, biz.OrderTimeoutMinutes)
+	if err != nil {
+		t.log.Warnf("扫描数据库超时订单失败: %v", err)
+		return
+	}
+	for _, order := range orders {
+		if err := t.canceler.CancelTimeoutOrder(ctx, order.OrderNo, "数据库兜底扫描订单超时"); err != nil {
+			t.log.Warnf("数据库兜底取消订单失败: orderNo=%s err=%v", order.OrderNo, err)
+		}
 	}
 }

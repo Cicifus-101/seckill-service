@@ -205,7 +205,7 @@ CREATE TABLE `pay_info` (
                             `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '支付信息ID',
                             `order_no` varchar(32) NOT NULL COMMENT '订单编号',
                             `user_id` bigint(20) unsigned NOT NULL COMMENT '用户ID',
-                            `pay_platform` tinyint(4) NOT NULL COMMENT '支付平台：1-支付宝，2-微信',
+                            `pay_platform` tinyint(4) NOT NULL COMMENT '支付平台：1-支付宝，2-微信 3-银行卡',
                             `platform_number` varchar(128) NOT NULL DEFAULT '' COMMENT '支付平台流水号',
                             `platform_status` varchar(32) NOT NULL DEFAULT '' COMMENT '支付状态',
                             `pay_amount` bigint(20) unsigned NOT NULL COMMENT '支付金额（单位：分）',
