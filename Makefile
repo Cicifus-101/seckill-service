@@ -82,7 +82,7 @@ help:
 
 .PHONY: init-db
 init-db:
-	-D:\MySQL\mysql-8.0.34-winx64\bin\mysql.exe -u root -p1256 < scripts/seckill.sql
+	-D:\MySQL\mysql-8.0.34-winx64\bin\mysql.exe -u root -p < scripts/seckill.sql
 
 .PHONY: gen-dao
 gen-dao:

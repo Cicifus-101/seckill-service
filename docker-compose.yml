@@ -7,11 +7,13 @@ services:
     restart: unless-stopped
     ports:
       - "6379:6379"
-    command: ["redis-server", "--appendonly", "yes", "--requirepass", "admin123", "--loadmodule", "/opt/redis-stack/lib/redisbloom.so"]
+    environment:
+      REDIS_PASSWORD: "${REDIS_PASSWORD:-change-me}"
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-change-me}", "--loadmodule", "/opt/redis-stack/lib/redisbloom.so"]
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "admin123", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a $${REDIS_PASSWORD:-change-me} ping"]
       interval: 10s
       timeout: 5s
       retries: 10

@@ -36,3 +36,8 @@ bin/
 .vscode/
 .idea/
 *.swp
+
+# Local configuration containing credentials
+configs/config.local.yaml
+docker/conf/config.local.yaml
+docker-compose.override.yml
